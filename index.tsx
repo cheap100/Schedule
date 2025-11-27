@@ -176,6 +176,7 @@ const App = () => {
   // Event Recording (Speech to Text) State
   const [isEventRecording, setIsEventRecording] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const textBeforeRecordingRef = useRef(""); // Keeps track of text before recording session to avoid duplication
 
   // Voice Memo Recorder State
   const [isMemoRecording, setIsMemoRecording] = useState(false);
@@ -293,9 +294,6 @@ const App = () => {
     speakText(text);
   };
 
-  // REMOVED: Auto-TTS on Startup useEffect
-  // This was causing mobile browsers to freeze/block scripts due to autoplay policies.
-
   // Alarm Check Loop
   useEffect(() => {
     const interval = setInterval(() => {
@@ -343,8 +341,6 @@ const App = () => {
     setSelectedDate(newDate);
     setNewEventText("");
     setIsEventModalOpen(true);
-    // Removed auto-speak on open to prevent accidental mobile freeze/double talk
-    // User can click the speaker button to hear the schedule.
   };
 
   const closeEventModal = () => {
@@ -386,7 +382,7 @@ const App = () => {
     }));
   };
 
-  // --- Web Speech API Logic (Text) ---
+  // --- Web Speech API Logic (Text) - Fixed Duplication Bug ---
   const startVoiceRecognition = () => {
     const win = window as unknown as IWindow;
     const SpeechRecognition = win.SpeechRecognition || win.webkitSpeechRecognition;
@@ -395,6 +391,9 @@ const App = () => {
       alert("이 브라우저는 음성 인식을 지원하지 않습니다.");
       return;
     }
+
+    // Save the text that was already in the input
+    textBeforeRecordingRef.current = newEventText;
 
     const recognition = new SpeechRecognition();
     recognition.lang = 'ko-KR';
@@ -406,21 +405,19 @@ const App = () => {
     };
 
     recognition.onresult = (event: any) => {
-      let finalTranscript = '';
+      let currentSessionTranscript = '';
       
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) {
-          finalTranscript += event.results[i][0].transcript;
-        }
+      // Calculate the full transcript for the current session from scratch
+      for (let i = 0; i < event.results.length; ++i) {
+         currentSessionTranscript += event.results[i][0].transcript;
       }
       
-      if (finalTranscript) {
-          setNewEventText(prev => {
-             const trimmedCurrent = prev.trim();
-             const trimmedNew = finalTranscript.trim();
-             return trimmedCurrent ? `${trimmedCurrent} ${trimmedNew}` : trimmedNew;
-          });
-      }
+      // Rebuild value: Initial Text + Current Session Transcript
+      const base = textBeforeRecordingRef.current;
+      // Add space if base text is not empty and transcript is not empty
+      const separator = (base && currentSessionTranscript) ? ' ' : '';
+      
+      setNewEventText(base + separator + currentSessionTranscript);
     };
 
     recognition.onerror = (event: any) => {
@@ -429,7 +426,7 @@ const App = () => {
     };
 
     recognition.onend = () => {
-      if (isEventRecording) setIsEventRecording(false);
+      setIsEventRecording(false);
     };
 
     recognition.start();
