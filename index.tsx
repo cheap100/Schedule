@@ -176,7 +176,6 @@ const App = () => {
   // Event Recording (Speech to Text) State
   const [isEventRecording, setIsEventRecording] = useState(false);
   const recognitionRef = useRef<any>(null);
-  // Removed manual tracking ref as we switch to event.resultIndex
 
   // Voice Memo Recorder State
   const [isMemoRecording, setIsMemoRecording] = useState(false);
@@ -197,7 +196,7 @@ const App = () => {
   // Refs
   const alarmAudioRef = useRef<HTMLAudioElement | null>(null);
   
-  // Initialize Audio Context for Beep
+  // Initialize Audio Context for Beep - Lazy loading is safer for mobile
   useEffect(() => {
     const audio = new Audio("https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg");
     audio.loop = true;
@@ -226,7 +225,6 @@ const App = () => {
 
       const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
       if (base64Audio) {
-        // Cast window to any to access webkitAudioContext
         const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
         const pcmData = base64ToBytes(base64Audio);
         const float32Data = new Float32Array(pcmData.length / 2);
@@ -250,28 +248,18 @@ const App = () => {
   };
 
   const speakText = (text: string) => {
-    // 1. Try Browser TTS
+    // 1. Try Browser TTS - Strictly use this if available
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'ko-KR';
       utterance.rate = 1.0;
-      // Handle error or end
-      utterance.onerror = () => {
-         // Fallback if browser error
-         speakWithGemini(text);
-      };
-      
-      // Attempt to speak
-      try {
-        window.speechSynthesis.speak(utterance);
-      } catch (e) {
-        speakWithGemini(text);
-      }
+      // Removed onerror fallback to prevent double-speak
+      window.speechSynthesis.speak(utterance);
       return;
     }
 
-    // 2. Fallback to Gemini
+    // 2. Fallback to Gemini only if Browser TTS is missing
     speakWithGemini(text);
   };
 
@@ -281,60 +269,32 @@ const App = () => {
     const minText = m === '00' ? '' : `${m}분`;
     const timeText = `${hour}시 ${minText}`;
     
-    // Read: "9시 30분, [내용]"
     speakText(`${timeText}, ${event.text}`);
   };
 
-  const speakSchedule = (date: Date, eventList: Event[], isStartup = false) => {
+  const speakSchedule = (date: Date, eventList: Event[]) => {
     const month = date.getMonth() + 1;
     const day = date.getDate();
     
-    let text = "";
-    if (isStartup) {
-       text = `반갑습니다. 오늘 ${month}월 ${day}일, `;
-    } else {
-       text = `${month}월 ${day}일 일정을 읽어드릴게요. `;
-    }
+    let text = `${month}월 ${day}일 일정을 읽어드릴게요. `;
 
     if (!eventList || eventList.length === 0) {
-      if (isStartup) {
-        text += "예정된 일정이 없습니다. 즐거운 하루 보내세요.";
-      } else {
-        text += "등록된 일정이 없습니다.";
-      }
+      text += "등록된 일정이 없습니다.";
     } else {
       text += `총 ${eventList.length}개의 일정이 있습니다. `;
       eventList.forEach((e) => {
         const [h, m] = e.time.split(':');
         const hour = parseInt(h, 10);
         const minText = m === '00' ? '' : `${m}분`;
-        // Add periods for pauses
         text += `${hour}시 ${minText}, ${e.text}. `;
       });
     }
 
-    // For startup, we don't force it if context is blocked, just try.
-    // If it fails silently, that's better than an alert.
     speakText(text);
   };
 
-  // Startup Notification
-  useEffect(() => {
-    const today = new Date();
-    const dateKey = formatDate(today);
-    const todayEvents = events[dateKey] || [];
-    
-    const timer = setTimeout(() => {
-        // Attempt to speak on load - browsers might block this without interaction
-        // but we suppress errors to avoid annoying alerts.
-        try {
-           speakSchedule(today, todayEvents, true);
-        } catch(e) {
-           console.log("Auto-speech blocked by browser policy");
-        }
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, []);
+  // REMOVED: Auto-TTS on Startup useEffect
+  // This was causing mobile browsers to freeze/block scripts due to autoplay policies.
 
   // Alarm Check Loop
   useEffect(() => {
@@ -383,14 +343,8 @@ const App = () => {
     setSelectedDate(newDate);
     setNewEventText("");
     setIsEventModalOpen(true);
-
-    const dateKey = formatDate(newDate);
-    // Auto read schedule on open
-    setTimeout(() => {
-        try {
-          speakSchedule(newDate, events[dateKey]);
-        } catch(e) { console.warn("TTS error on open", e) }
-    }, 500);
+    // Removed auto-speak on open to prevent accidental mobile freeze/double talk
+    // User can click the speaker button to hear the schedule.
   };
 
   const closeEventModal = () => {
@@ -454,7 +408,6 @@ const App = () => {
     recognition.onresult = (event: any) => {
       let finalTranscript = '';
       
-      // Use resultIndex to correctly get only the new results
       for (let i = event.resultIndex; i < event.results.length; ++i) {
         if (event.results[i].isFinal) {
           finalTranscript += event.results[i][0].transcript;
@@ -504,7 +457,6 @@ const App = () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
-      // Determine MIME type (Prioritize MP4 for Safari/iOS compatibility)
       let mimeType = 'audio/webm';
       if (MediaRecorder.isTypeSupported('audio/mp4')) {
          mimeType = 'audio/mp4'; 
@@ -521,7 +473,6 @@ const App = () => {
       try {
         mediaRecorder = new MediaRecorder(stream, options);
       } catch (e) {
-        // Fallback for browsers that don't support options well
         mediaRecorder = new MediaRecorder(stream);
       }
 
@@ -535,7 +486,6 @@ const App = () => {
       };
 
       mediaRecorder.onstop = async () => {
-        // Use the actual mime type of the recorder or fallback
         const finalMimeType = mediaRecorder.mimeType || mimeType || 'audio/webm';
         const audioBlob = new Blob(audioChunksRef.current, { type: finalMimeType });
         
@@ -592,13 +542,11 @@ const App = () => {
   };
 
   const playMemo = async (memo: VoiceMemo) => {
-    // Stop any currently playing audio
     if (activeAudioRef.current) {
         activeAudioRef.current.pause();
         activeAudioRef.current = null;
     }
     
-    // Toggle off if clicking the same one
     if (playingMemoId === memo.id) {
        setPlayingMemoId(null);
        return;
@@ -617,14 +565,13 @@ const App = () => {
         
         audio.onerror = (e) => {
             console.error("Audio Playback Error", e);
-            alert("재생 중 오류가 발생했습니다. 파일 형식이 호환되지 않을 수 있습니다.");
+            alert("재생 중 오류가 발생했습니다.");
             setPlayingMemoId(null);
         };
 
         await audio.play();
     } catch (e) {
         console.error("Play failed", e);
-        // Don't show alert for simple play interruptions
         setPlayingMemoId(null);
     }
   };
@@ -698,7 +645,7 @@ const App = () => {
       const hasEvents = events[dateKey]?.length > 0;
       const isTodayCell = isToday(d);
       
-      let containerClass = "h-28 p-1.5 cursor-pointer transition-all duration-200 flex flex-col relative border-r border-b border-gray-100 ";
+      let containerClass = "h-28 p-1.5 cursor-pointer transition-all duration-200 flex flex-col relative border-r border-b border-gray-100 touch-manipulation ";
       
       if (isSelected(d)) {
          containerClass += "bg-teal-50 z-10 ring-2 ring-inset ring-teal-200 shadow-inner";
@@ -763,7 +710,7 @@ const App = () => {
   }
 
   return (
-    <div className="min-h-screen bg-white text-gray-800 font-sans pb-20 select-none">
+    <div className="min-h-screen bg-white text-gray-800 font-sans pb-20 select-none touch-manipulation">
       {/* Top Bar */}
       <header className="bg-white sticky top-0 z-50 border-b border-gray-100 shadow-sm">
         <div className="max-w-md mx-auto px-6 h-16 flex items-center justify-between">
@@ -777,13 +724,13 @@ const App = () => {
           <div className="flex items-center space-x-2">
             <button 
               onClick={openVoiceMemoModal} 
-              className="p-2.5 bg-white border border-gray-200 rounded-full text-gray-500 hover:text-orange-500 hover:border-orange-200 hover:bg-orange-50 transition-all active:scale-95 shadow-sm"
+              className="p-2.5 bg-white border border-gray-200 rounded-full text-gray-500 hover:text-orange-500 hover:border-orange-200 hover:bg-orange-50 transition-all active:scale-95 shadow-sm touch-manipulation"
               title="음성 녹음기"
             >
               <MicIcon className="w-5 h-5" />
             </button>
 
-            <button onClick={handleCameraClick} className="p-2.5 bg-white border border-gray-200 rounded-full text-gray-500 hover:text-teal-600 hover:border-teal-200 hover:bg-teal-50 transition-all active:scale-95 shadow-sm relative">
+            <button onClick={handleCameraClick} className="p-2.5 bg-white border border-gray-200 rounded-full text-gray-500 hover:text-teal-600 hover:border-teal-200 hover:bg-teal-50 transition-all active:scale-95 shadow-sm relative touch-manipulation">
               <CameraIcon className="w-5 h-5" />
               <input 
                 type="file" 
@@ -802,20 +749,20 @@ const App = () => {
         
         {/* Calendar Card */}
         <div 
-          className="bg-white rounded-3xl shadow-xl shadow-gray-200/40 overflow-hidden ring-1 ring-gray-100"
+          className="bg-white rounded-3xl shadow-xl shadow-gray-200/40 overflow-hidden ring-1 ring-gray-100 touch-manipulation"
           onTouchStart={onTouchStart}
           onTouchMove={onTouchMove}
           onTouchEnd={onTouchEnd}
         >
           {/* Calendar Header */}
           <div className="p-6 flex items-center justify-between border-b border-gray-100 bg-white">
-            <button onClick={handlePrevMonth} className="p-2 hover:bg-gray-50 rounded-full transition text-gray-400 hover:text-gray-800">
+            <button onClick={handlePrevMonth} className="p-2 hover:bg-gray-50 rounded-full transition text-gray-400 hover:text-gray-800 touch-manipulation">
               <ChevronLeft />
             </button>
             <h2 className="text-2xl font-bold text-gray-900 tracking-tight">
               {currentDate.getFullYear()}년 {String(currentDate.getMonth() + 1).padStart(2, '0')}월
             </h2>
-            <button onClick={handleNextMonth} className="p-2 hover:bg-gray-50 rounded-full transition text-gray-400 hover:text-gray-800">
+            <button onClick={handleNextMonth} className="p-2 hover:bg-gray-50 rounded-full transition text-gray-400 hover:text-gray-800 touch-manipulation">
               <ChevronRight />
             </button>
           </div>
@@ -860,7 +807,7 @@ const App = () => {
                  
                  <button 
                     onClick={isMemoRecording ? stopMemoRecording : startMemoRecording}
-                    className={`w-20 h-20 rounded-full shadow-2xl flex items-center justify-center transition-all transform hover:scale-105 active:scale-95 duration-200 ${
+                    className={`w-20 h-20 rounded-full shadow-2xl flex items-center justify-center transition-all transform hover:scale-105 active:scale-95 duration-200 touch-manipulation ${
                       isMemoRecording 
                       ? 'bg-white border-[6px] border-orange-500 text-orange-500' 
                       : 'bg-gradient-to-tr from-orange-400 to-rose-500 text-white shadow-orange-200'
@@ -892,7 +839,7 @@ const App = () => {
                        <li 
                           key={memo.id} 
                           onClick={() => playMemo(memo)}
-                          className={`flex items-center justify-between p-4 rounded-2xl shadow-sm border transition-all cursor-pointer group active:scale-[0.98]
+                          className={`flex items-center justify-between p-4 rounded-2xl shadow-sm border transition-all cursor-pointer group active:scale-[0.98] touch-manipulation
                             ${playingMemoId === memo.id 
                                 ? 'bg-white border-orange-300 ring-2 ring-orange-100 shadow-md' 
                                 : 'bg-white border-gray-100 hover:border-teal-300 hover:shadow-md'}
@@ -910,7 +857,7 @@ const App = () => {
                           <div className="flex items-center space-x-2">
                              <button 
                                 onClick={(e) => deleteMemo(e, memo.id)}
-                                className="p-2.5 rounded-full text-gray-300 hover:text-rose-500 hover:bg-rose-50 transition"
+                                className="p-2.5 rounded-full text-gray-300 hover:text-rose-500 hover:bg-rose-50 transition touch-manipulation"
                              >
                                 <TrashIcon/>
                              </button>
@@ -941,7 +888,7 @@ const App = () => {
                     </h3>
                     <button 
                       onClick={() => speakSchedule(selectedDate, events[formatDate(selectedDate)])}
-                      className="text-white hover:text-teal-100 transition p-1.5 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-sm"
+                      className="text-white hover:text-teal-100 transition p-1.5 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-sm touch-manipulation"
                       title="전체 듣기"
                     >
                       <SpeakerIcon className="w-5 h-5"/>
@@ -950,7 +897,7 @@ const App = () => {
                </div>
                <button 
                   onClick={closeEventModal}
-                  className="bg-white/10 hover:bg-white/20 text-white rounded-full p-2 transition backdrop-blur-sm"
+                  className="bg-white/10 hover:bg-white/20 text-white rounded-full p-2 transition backdrop-blur-sm touch-manipulation"
                >
                  <XIcon />
                </button>
@@ -976,14 +923,14 @@ const App = () => {
                       <div className="flex items-center space-x-1">
                          <button 
                            onClick={() => speakSingleEvent(event)}
-                           className="text-gray-300 hover:text-teal-500 p-1.5 rounded-full hover:bg-teal-50 transition"
+                           className="text-gray-300 hover:text-teal-500 p-1.5 rounded-full hover:bg-teal-50 transition touch-manipulation"
                            title="일정 듣기"
                          >
                             <SpeakerIcon className="w-4 h-4" />
                          </button>
                          <button 
                            onClick={() => handleDeleteEvent(event.id)}
-                           className="text-gray-300 hover:text-rose-500 p-1.5 rounded-full hover:bg-rose-50 transition"
+                           className="text-gray-300 hover:text-rose-500 p-1.5 rounded-full hover:bg-rose-50 transition touch-manipulation"
                          >
                            <TrashIcon />
                          </button>
@@ -1029,7 +976,7 @@ const App = () => {
                     {/* Recording Control */}
                     <button 
                       onClick={toggleVoiceRecording}
-                      className={`flex-1 flex items-center justify-center space-x-2 p-3 rounded-xl font-bold transition-all ${
+                      className={`flex-1 flex items-center justify-center space-x-2 p-3 rounded-xl font-bold transition-all touch-manipulation ${
                         isEventRecording 
                           ? 'bg-orange-500 text-white shadow-lg shadow-orange-200 ring-2 ring-orange-300' 
                           : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'
@@ -1061,7 +1008,7 @@ const App = () => {
 
                 <button 
                   onClick={handleAddEvent}
-                  className="w-full text-white bg-teal-600 hover:bg-teal-700 focus:ring-4 focus:ring-teal-200 font-bold rounded-xl text-sm px-5 py-4 text-center shadow-lg shadow-teal-100 transition-all transform hover:scale-[1.02] active:scale-95"
+                  className="w-full text-white bg-teal-600 hover:bg-teal-700 focus:ring-4 focus:ring-teal-200 font-bold rounded-xl text-sm px-5 py-4 text-center shadow-lg shadow-teal-100 transition-all transform hover:scale-[1.02] active:scale-95 touch-manipulation"
                 >
                   저장하기
                 </button>
@@ -1096,7 +1043,7 @@ const App = () => {
 
             <button 
               onClick={stopAlarm}
-              className="w-full max-w-sm text-white bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600 font-bold rounded-2xl text-xl px-8 py-5 shadow-xl shadow-orange-200 transition transform hover:scale-[1.02] active:scale-95"
+              className="w-full max-w-sm text-white bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600 font-bold rounded-2xl text-xl px-8 py-5 shadow-xl shadow-orange-200 transition transform hover:scale-[1.02] active:scale-95 touch-manipulation"
             >
               알람 끄기
             </button>
