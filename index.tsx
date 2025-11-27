@@ -392,12 +392,18 @@ const App = () => {
       return;
     }
 
+    // Stop existing instance if any
+    if (recognitionRef.current) {
+        recognitionRef.current.stop();
+        recognitionRef.current = null;
+    }
+
     // Save the text that was already in the input
     textBeforeRecordingRef.current = newEventText;
 
     const recognition = new SpeechRecognition();
     recognition.lang = 'ko-KR';
-    recognition.continuous = true; 
+    recognition.continuous = false; // Changed to false to prevent duplication loops
     recognition.interimResults = true; 
 
     recognition.onstart = () => {
@@ -405,19 +411,13 @@ const App = () => {
     };
 
     recognition.onresult = (event: any) => {
-      let currentSessionTranscript = '';
+      // With continuous=false, we generally care about the first result in the list (index 0)
+      const transcript = event.results[0][0].transcript;
       
-      // Calculate the full transcript for the current session from scratch
-      for (let i = 0; i < event.results.length; ++i) {
-         currentSessionTranscript += event.results[i][0].transcript;
-      }
-      
-      // Rebuild value: Initial Text + Current Session Transcript
       const base = textBeforeRecordingRef.current;
-      // Add space if base text is not empty and transcript is not empty
-      const separator = (base && currentSessionTranscript) ? ' ' : '';
+      const separator = (base && transcript) ? ' ' : '';
       
-      setNewEventText(base + separator + currentSessionTranscript);
+      setNewEventText(base + separator + transcript);
     };
 
     recognition.onerror = (event: any) => {
@@ -429,8 +429,13 @@ const App = () => {
       setIsEventRecording(false);
     };
 
-    recognition.start();
-    recognitionRef.current = recognition;
+    try {
+        recognition.start();
+        recognitionRef.current = recognition;
+    } catch(e) {
+        console.error("Recognition start failed", e);
+        setIsEventRecording(false);
+    }
   };
 
   const stopVoiceRecognition = () => {
@@ -997,7 +1002,7 @@ const App = () => {
                     id="eventInput"
                     value={newEventText}
                     onChange={(e) => setNewEventText(e.target.value)}
-                    placeholder="일정 내용을 입력하세요"
+                    placeholder="일정 내용을 말하거나 입력하세요"
                     rows={2}
                     className={`bg-white border border-gray-200 text-gray-800 text-sm font-medium rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-teal-500 block w-full p-3 transition-colors resize-none placeholder-gray-400 ${isEventRecording ? 'bg-orange-50 border-orange-200 placeholder-orange-300' : ''}`}
                   />
