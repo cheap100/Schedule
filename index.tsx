@@ -1,7 +1,6 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
-import { GoogleGenAI, Modality } from "@google/genai";
 
 // --- Icons ---
 const MicIcon = ({ className = "w-6 h-6" }) => (
@@ -65,24 +64,10 @@ const generateTimeOptions = () => {
   return times;
 };
 
-// --- Audio Utils for Live API ---
-const base64Encode = (buffer: ArrayBuffer) => {
-    let binary = '';
-    const bytes = new Uint8Array(buffer);
-    const len = bytes.byteLength;
-    for (let i = 0; i < len; i++) {
-        binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
-}
-
-const float32ToInt16 = (float32: Float32Array) => {
-    const int16 = new Int16Array(float32.length);
-    for (let i = 0; i < float32.length; i++) {
-        let s = Math.max(-1, Math.min(1, float32[i]));
-        int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-    }
-    return int16.buffer;
+// --- Web Speech API Types ---
+interface IWindow extends Window {
+  webkitSpeechRecognition: any;
+  SpeechRecognition: any;
 }
 
 // --- Main App ---
@@ -106,9 +91,9 @@ const App = () => {
   const [newEventTime, setNewEventTime] = useState("09:00");
   const [newEventText, setNewEventText] = useState("");
   
-  // Live Transcription State
+  // Voice State
   const [isRecording, setIsRecording] = useState(false);
-  const [isLiveConnected, setIsLiveConnected] = useState(false);
+  const recognitionRef = useRef<any>(null);
   
   // Alarm State
   const [alarmActive, setAlarmActive] = useState<{ text: string, time: string } | null>(null);
@@ -120,13 +105,6 @@ const App = () => {
   // Refs
   const alarmAudioRef = useRef<HTMLAudioElement | null>(null);
   
-  // Live API Refs
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const liveSessionRef = useRef<any>(null);
-
   // Initialize Audio Context for Beep
   useEffect(() => {
     const audio = new Audio("https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg");
@@ -186,7 +164,7 @@ const App = () => {
   const closeEventModal = () => {
     setIsEventModalOpen(false);
     if (isRecording) {
-      stopLiveTranscription();
+      stopVoiceRecognition();
     }
   };
 
@@ -218,132 +196,83 @@ const App = () => {
     }));
   };
 
-  // --- Live API Logic ---
-  const startLiveTranscription = async () => {
-    try {
-      setIsLiveConnected(true); // Show loading state
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      
-      // Setup Audio Context (16kHz required for Gemini Live)
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-      audioContextRef.current = audioContext;
+  // --- Web Speech API Logic ---
+  const startVoiceRecognition = () => {
+    const win = window as unknown as IWindow;
+    const SpeechRecognition = win.SpeechRecognition || win.webkitSpeechRecognition;
 
-      // Get Microphone Stream
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: { 
-          channelCount: 1, 
-          sampleRate: 16000 
-        } 
-      });
-      streamRef.current = stream;
-
-      const source = audioContext.createMediaStreamSource(stream);
-      sourceRef.current = source;
-      
-      // Use ScriptProcessor for raw PCM access (buffer size 4096)
-      const processor = audioContext.createScriptProcessor(4096, 1, 1);
-      processorRef.current = processor;
-
-      // Connect to Gemini Live
-      const session = await ai.live.connect({
-        model: 'gemini-2.5-flash-native-audio-preview-09-2025',
-        config: {
-           // We only want transcription, but Modality.AUDIO is required.
-           // We will mute output by not playing it.
-           responseModalities: [Modality.AUDIO], 
-           inputAudioTranscription: {}, // Enable transcription of user input
-           systemInstruction: "You are a helpful transcriber. Listen to the user's speech and transcribe it accurately. Do not respond with audio.",
-        },
-        callbacks: {
-           onopen: () => {
-              console.log("Gemini Live Connected");
-              setIsRecording(true);
-              setIsLiveConnected(false); // Ready
-              
-              // Start streaming audio
-              processor.onaudioprocess = (e) => {
-                  const inputData = e.inputBuffer.getChannelData(0);
-                  // Convert Float32 to Int16 PCM
-                  const pcmBuffer = float32ToInt16(inputData);
-                  const base64Data = base64Encode(pcmBuffer);
-                  
-                  session.sendRealtimeInput({
-                      media: {
-                          mimeType: "audio/pcm;rate=16000",
-                          data: base64Data
-                      }
-                  });
-              };
-           },
-           onmessage: (msg) => {
-              // Handle Transcription
-              if (msg.serverContent?.inputTranscription) {
-                  const text = msg.serverContent.inputTranscription.text;
-                  if (text) {
-                     setNewEventText(prev => prev + text);
-                  }
-              }
-           },
-           onclose: () => {
-              console.log("Gemini Live Closed");
-              setIsRecording(false);
-           },
-           onerror: (err) => {
-              console.error("Gemini Live Error:", err);
-              setIsRecording(false);
-              alert("음성 연결 중 오류가 발생했습니다.");
-           }
-        }
-      });
-      
-      liveSessionRef.current = session;
-      
-      // Connect audio graph
-      source.connect(processor);
-      processor.connect(audioContext.destination);
-
-    } catch (err) {
-      console.error("Failed to start live transcription:", err);
-      setIsLiveConnected(false);
-      setIsRecording(false);
-      alert("마이크 사용 권한이 없거나 오류가 발생했습니다.");
+    if (!SpeechRecognition) {
+      alert("이 브라우저는 음성 인식을 지원하지 않습니다. Chrome이나 Safari를 사용해주세요.");
+      return;
     }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'ko-KR'; // 한국어 설정
+    recognition.continuous = true; // 멈출때까지 계속 인식
+    recognition.interimResults = true; // 중간 결과 표시
+
+    recognition.onstart = () => {
+      setIsRecording(true);
+    };
+
+    recognition.onresult = (event: any) => {
+      let finalTranscript = '';
+      let interimTranscript = '';
+
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript;
+        } else {
+          interimTranscript += event.results[i][0].transcript;
+        }
+      }
+      
+      // 기존 텍스트에 덧붙이지 않고, 현재 세션의 입력값을 처리하려면 로직이 복잡해지므로
+      // 여기서는 심플하게 현재 인식된 내용을 바로 반영합니다.
+      // 사용자가 직접 타이핑한 것과 섞이지 않게 하려면 append 방식이 좋으나,
+      // React state 업데이트 타이밍 이슈가 있으므로 아래 방식 사용
+      
+      // 실제로는 중간 결과(interim)를 보여주다가 확정(final)되면 state에 박는게 가장 자연스러움
+      // 간단하게 구현:
+      if (finalTranscript) {
+          setNewEventText(prev => prev + " " + finalTranscript);
+      }
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error("Speech recognition error", event.error);
+      setIsRecording(false);
+    };
+
+    recognition.onend = () => {
+      // 멈춤 버튼을 누르지 않았는데 저절로 꺼지는 경우 (침묵 등)
+      // continuous가 true여도 오래 침묵하면 꺼질 수 있음
+      // 여기서는 상태만 업데이트
+      if (isRecording) {
+         // 의도치 않게 꺼졌으면 다시 켜거나, 그냥 꺼진 상태로 둘 수 있음.
+         // UX상 그냥 꺼지는게 나을 수 있음.
+         setIsRecording(false);
+      }
+    };
+
+    recognition.start();
+    recognitionRef.current = recognition;
   };
 
-  const stopLiveTranscription = () => {
-    // Cleanup Audio
-    if (processorRef.current) {
-        processorRef.current.disconnect();
-        processorRef.current = null;
+  const stopVoiceRecognition = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
     }
-    if (sourceRef.current) {
-        sourceRef.current.disconnect();
-        sourceRef.current = null;
-    }
-    if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-        streamRef.current = null;
-    }
-    if (audioContextRef.current) {
-        audioContextRef.current.close();
-        audioContextRef.current = null;
-    }
-
-    // Close Session
-    if (liveSessionRef.current) {
-        // There is no explicit close() on the session object in some versions,
-        // but disconnecting the socket handled by the library usually suffices.
-        // If the library supports it, we call close. 
-        // Based on provided doc, there isn't a strict 'close' method exposed on the *session* object 
-        // but usually the connection is managed. 
-        // We will just drop the reference and the server will timeout or we can assume it closes with the component unmount.
-        // Actually, for proper cleanup, we rely on the object being garbage collected or the socket closing.
-        // Re-connecting handles new sessions.
-        liveSessionRef.current = null;
-    }
-    
     setIsRecording(false);
-    setIsLiveConnected(false);
+  };
+
+  const toggleVoiceRecording = () => {
+    if (isRecording) {
+      stopVoiceRecognition();
+    } else {
+      startVoiceRecognition();
+    }
   };
 
   // --- Swipe Logic ---
@@ -586,7 +515,18 @@ const App = () => {
               <div className="border-t border-gray-100 pt-4">
                 <label className="block text-xs font-bold text-gray-500 mb-2 flex justify-between items-center">
                   <span>새 일정 추가</span>
-                  {isRecording && <span className="text-red-500 animate-pulse">실시간 음성 인식 중...</span>}
+                  {/* Status */}
+                  {isRecording && (
+                    <div className="flex items-center space-x-2">
+                       <span className="text-red-500 text-xs animate-pulse font-bold">● 음성 인식 중...</span>
+                       {/* Wave animation using CSS bars */}
+                       <div className="flex items-end space-x-0.5 h-3">
+                          <div className="w-1 bg-red-400 rounded-full animate-wave-1"></div>
+                          <div className="w-1 bg-red-400 rounded-full animate-wave-2"></div>
+                          <div className="w-1 bg-red-400 rounded-full animate-wave-3"></div>
+                       </div>
+                    </div>
+                  )}
                 </label>
                 <div className="flex flex-col space-y-3 mb-3">
                   <div className="flex space-x-2">
@@ -602,17 +542,14 @@ const App = () => {
                     
                     {/* Recording Control */}
                     <button 
-                      onClick={isRecording ? stopLiveTranscription : startLiveTranscription}
-                      disabled={isLiveConnected}
+                      onClick={toggleVoiceRecording}
                       className={`flex-1 flex items-center justify-center space-x-2 p-2.5 rounded-lg font-bold transition-all ${
                         isRecording 
-                          ? 'bg-red-500 text-white shadow-inner' 
+                          ? 'bg-red-500 text-white shadow-inner ring-2 ring-red-300' 
                           : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                       }`}
                     >
-                      {isLiveConnected ? (
-                         <span>연결 중...</span>
-                      ) : isRecording ? (
+                      {isRecording ? (
                         <>
                            <div className="w-2 h-2 bg-white rounded-full animate-ping"></div>
                            <span>인식 중지 (클릭)</span>
@@ -632,7 +569,7 @@ const App = () => {
                     onChange={(e) => setNewEventText(e.target.value)}
                     placeholder="내용을 입력하거나 음성 버튼을 눌러 말해보세요."
                     rows={2}
-                    className={`bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 transition-colors resize-none ${isRecording ? 'bg-red-50 border-red-200' : ''}`}
+                    className={`bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 transition-colors resize-none ${isRecording ? 'bg-red-50 border-red-200 placeholder-red-300' : ''}`}
                   />
                 </div>
 
@@ -682,6 +619,13 @@ const App = () => {
         .animate-fade-in {
           animation: fade-in 0.2s ease-out forwards;
         }
+        @keyframes wave {
+          0%, 100% { height: 4px; }
+          50% { height: 12px; }
+        }
+        .animate-wave-1 { animation: wave 0.8s infinite ease-in-out; }
+        .animate-wave-2 { animation: wave 0.8s infinite ease-in-out 0.1s; }
+        .animate-wave-3 { animation: wave 0.8s infinite ease-in-out 0.2s; }
       `}</style>
     </div>
   );
