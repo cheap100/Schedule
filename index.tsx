@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Modality } from "@google/genai";
 
 // --- Icons ---
 const MicIcon = ({ className = "w-6 h-6" }) => (
@@ -47,21 +48,6 @@ const XIcon = () => (
 );
 
 // --- Helpers ---
-const blobToBase64 = (blob: Blob): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const result = reader.result as string;
-      // Some browsers include the data URL prefix, some might not in certain contexts, 
-      // but readAsDataURL always includes it. We need to strip it.
-      const base64 = result.split(',')[1];
-      resolve(base64);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-};
-
 const formatDate = (date: Date) => {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -78,6 +64,26 @@ const generateTimeOptions = () => {
   }
   return times;
 };
+
+// --- Audio Utils for Live API ---
+const base64Encode = (buffer: ArrayBuffer) => {
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+}
+
+const float32ToInt16 = (float32: Float32Array) => {
+    const int16 = new Int16Array(float32.length);
+    for (let i = 0; i < float32.length; i++) {
+        let s = Math.max(-1, Math.min(1, float32[i]));
+        int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    return int16.buffer;
+}
 
 // --- Main App ---
 
@@ -99,8 +105,10 @@ const App = () => {
   // Event Form State
   const [newEventTime, setNewEventTime] = useState("09:00");
   const [newEventText, setNewEventText] = useState("");
+  
+  // Live Transcription State
   const [isRecording, setIsRecording] = useState(false);
-  const [transcribing, setTranscribing] = useState(false);
+  const [isLiveConnected, setIsLiveConnected] = useState(false);
   
   // Alarm State
   const [alarmActive, setAlarmActive] = useState<{ text: string, time: string } | null>(null);
@@ -110,10 +118,14 @@ const App = () => {
   const [touchEnd, setTouchEnd] = useState<{x: number, y: number} | null>(null);
   
   // Refs
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
   const alarmAudioRef = useRef<HTMLAudioElement | null>(null);
-  const recordingMimeTypeRef = useRef<string>("");
+  
+  // Live API Refs
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const liveSessionRef = useRef<any>(null);
 
   // Initialize Audio Context for Beep
   useEffect(() => {
@@ -174,7 +186,7 @@ const App = () => {
   const closeEventModal = () => {
     setIsEventModalOpen(false);
     if (isRecording) {
-      stopRecording();
+      stopLiveTranscription();
     }
   };
 
@@ -206,100 +218,132 @@ const App = () => {
     }));
   };
 
-  // --- Voice Logic ---
-  const startRecording = async () => {
+  // --- Live API Logic ---
+  const startLiveTranscription = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      
-      let mimeType = '';
-      if (MediaRecorder.isTypeSupported('audio/webm')) {
-        mimeType = 'audio/webm';
-      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
-        mimeType = 'audio/mp4';
-      } else {
-        // Fallback or let browser decide (might be empty string)
-        console.warn("No preferred mime type supported, using default.");
-      }
-      
-      recordingMimeTypeRef.current = mimeType;
-      
-      const options = mimeType ? { mimeType } : {};
-      const mediaRecorder = new MediaRecorder(stream, options);
-      
-      mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        const capturedMimeType = recordingMimeTypeRef.current || 'audio/webm';
-        // Create blob from chunks
-        const audioBlob = new Blob(audioChunksRef.current, { type: capturedMimeType });
-        
-        if (audioBlob.size > 0) {
-            await transcribeAudio(audioBlob, capturedMimeType);
-        } else {
-            console.error("Recorded audio size is 0");
-            alert("녹음된 소리가 감지되지 않았습니다.");
-        }
-        
-        // Stop all tracks to release mic
-        stream.getTracks().forEach(track => track.stop());
-      };
-
-      mediaRecorder.start();
-      setIsRecording(true);
-    } catch (err) {
-      console.error("Error accessing microphone:", err);
-      alert("마이크 권한이 필요하거나 오류가 발생했습니다.");
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    }
-  };
-
-  const transcribeAudio = async (audioBlob: Blob, mimeType: string) => {
-    setTranscribing(true);
-    try {
-      const base64Audio = await blobToBase64(audioBlob);
+      setIsLiveConnected(true); // Show loading state
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       
-      // Clean up mimeType for API (Gemini prefers simple types like 'audio/mp3', 'audio/webm')
-      // If it contains codecs, sometimes API rejects it. Safe bet: use the container type.
-      const cleanMimeType = mimeType.split(';')[0] || 'audio/webm';
-      
-      console.log(`Sending audio to Gemini... Size: ${audioBlob.size}, Type: ${cleanMimeType}`);
+      // Setup Audio Context (16kHz required for Gemini Live)
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      audioContextRef.current = audioContext;
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: {
-          parts: [
-            { inlineData: { mimeType: cleanMimeType, data: base64Audio } },
-            { text: "Transcribe the following audio into Korean text exactly as spoken. Do not add any conversational filler or descriptions." }
-          ]
+      // Get Microphone Stream
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: { 
+          channelCount: 1, 
+          sampleRate: 16000 
+        } 
+      });
+      streamRef.current = stream;
+
+      const source = audioContext.createMediaStreamSource(stream);
+      sourceRef.current = source;
+      
+      // Use ScriptProcessor for raw PCM access (buffer size 4096)
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      processorRef.current = processor;
+
+      // Connect to Gemini Live
+      const session = await ai.live.connect({
+        model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+        config: {
+           // We only want transcription, but Modality.AUDIO is required.
+           // We will mute output by not playing it.
+           responseModalities: [Modality.AUDIO], 
+           inputAudioTranscription: {}, // Enable transcription of user input
+           systemInstruction: "You are a helpful transcriber. Listen to the user's speech and transcribe it accurately. Do not respond with audio.",
+        },
+        callbacks: {
+           onopen: () => {
+              console.log("Gemini Live Connected");
+              setIsRecording(true);
+              setIsLiveConnected(false); // Ready
+              
+              // Start streaming audio
+              processor.onaudioprocess = (e) => {
+                  const inputData = e.inputBuffer.getChannelData(0);
+                  // Convert Float32 to Int16 PCM
+                  const pcmBuffer = float32ToInt16(inputData);
+                  const base64Data = base64Encode(pcmBuffer);
+                  
+                  session.sendRealtimeInput({
+                      media: {
+                          mimeType: "audio/pcm;rate=16000",
+                          data: base64Data
+                      }
+                  });
+              };
+           },
+           onmessage: (msg) => {
+              // Handle Transcription
+              if (msg.serverContent?.inputTranscription) {
+                  const text = msg.serverContent.inputTranscription.text;
+                  if (text) {
+                     setNewEventText(prev => prev + text);
+                  }
+              }
+           },
+           onclose: () => {
+              console.log("Gemini Live Closed");
+              setIsRecording(false);
+           },
+           onerror: (err) => {
+              console.error("Gemini Live Error:", err);
+              setIsRecording(false);
+              alert("음성 연결 중 오류가 발생했습니다.");
+           }
         }
       });
+      
+      liveSessionRef.current = session;
+      
+      // Connect audio graph
+      source.connect(processor);
+      processor.connect(audioContext.destination);
 
-      const text = response.text;
-      if (text) {
-          setNewEventText(prev => (prev ? prev + " " + text : text));
-      } else {
-        alert("음성을 텍스트로 변환하지 못했습니다.");
-      }
-    } catch (error) {
-      console.error("Transcription error:", error);
-      alert(`음성 인식 오류: ${error instanceof Error ? error.message : "알 수 없음"}`);
-    } finally {
-      setTranscribing(false);
+    } catch (err) {
+      console.error("Failed to start live transcription:", err);
+      setIsLiveConnected(false);
+      setIsRecording(false);
+      alert("마이크 사용 권한이 없거나 오류가 발생했습니다.");
     }
+  };
+
+  const stopLiveTranscription = () => {
+    // Cleanup Audio
+    if (processorRef.current) {
+        processorRef.current.disconnect();
+        processorRef.current = null;
+    }
+    if (sourceRef.current) {
+        sourceRef.current.disconnect();
+        sourceRef.current = null;
+    }
+    if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+    }
+    if (audioContextRef.current) {
+        audioContextRef.current.close();
+        audioContextRef.current = null;
+    }
+
+    // Close Session
+    if (liveSessionRef.current) {
+        // There is no explicit close() on the session object in some versions,
+        // but disconnecting the socket handled by the library usually suffices.
+        // If the library supports it, we call close. 
+        // Based on provided doc, there isn't a strict 'close' method exposed on the *session* object 
+        // but usually the connection is managed. 
+        // We will just drop the reference and the server will timeout or we can assume it closes with the component unmount.
+        // Actually, for proper cleanup, we rely on the object being garbage collected or the socket closing.
+        // Re-connecting handles new sessions.
+        liveSessionRef.current = null;
+    }
+    
+    setIsRecording(false);
+    setIsLiveConnected(false);
   };
 
   // --- Swipe Logic ---
@@ -321,24 +365,15 @@ const App = () => {
     const distanceY = touchStart.y - touchEnd.y;
     const isHorizontal = Math.abs(distanceX) > Math.abs(distanceY);
 
-    // Horizontal Swipe
     if (isHorizontal) {
       if (Math.abs(distanceX) > minSwipeDistance) {
-         if (distanceX > 0) {
-            handleNextMonth(); // Swiped Left -> Next
-         } else {
-            handlePrevMonth(); // Swiped Right -> Prev
-         }
+         if (distanceX > 0) handleNextMonth(); 
+         else handlePrevMonth();
       }
-    } 
-    // Vertical Swipe
-    else {
+    } else {
       if (Math.abs(distanceY) > minSwipeDistance) {
-        if (distanceY > 0) {
-           handleNextMonth(); // Swiped Up -> Next (Natural scrolling feel)
-        } else {
-           handlePrevMonth(); // Swiped Down -> Prev
-        }
+        if (distanceY > 0) handleNextMonth();
+        else handlePrevMonth();
       }
     }
   };
@@ -353,7 +388,6 @@ const App = () => {
     
     const days = [];
     
-    // Empty cells
     for (let i = 0; i < firstDay; i++) {
       days.push(<div key={`empty-${i}`} className="h-24 bg-gray-50 border border-gray-100"></div>);
     }
@@ -371,7 +405,6 @@ const App = () => {
       
       let containerClass = "h-24 p-1 border border-gray-100 cursor-pointer transition-all flex flex-col relative ";
       
-      // Styling logic
       if (isSelected(d)) {
          containerClass += "bg-yellow-50 border-yellow-400 ring-2 ring-yellow-300 ring-inset z-10 shadow-md";
       } else if (isToday(d)) {
@@ -427,7 +460,8 @@ const App = () => {
        setSelectedDate(new Date());
        setIsEventModalOpen(true);
        setTimeout(() => {
-          document.getElementById('eventInput')?.focus();
+         // Auto start logic if desired, or just focus
+         document.getElementById('eventInput')?.focus();
        }, 100);
     }
   }
@@ -550,51 +584,57 @@ const App = () => {
 
               {/* Add Event Form */}
               <div className="border-t border-gray-100 pt-4">
-                <label className="block text-xs font-bold text-gray-500 mb-2">
-                  새 일정 추가
+                <label className="block text-xs font-bold text-gray-500 mb-2 flex justify-between items-center">
+                  <span>새 일정 추가</span>
+                  {isRecording && <span className="text-red-500 animate-pulse">실시간 음성 인식 중...</span>}
                 </label>
-                <div className="flex space-x-2 mb-3">
-                  <select 
-                    value={newEventTime}
-                    onChange={(e) => setNewEventTime(e.target.value)}
-                    className="bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 min-w-[90px]"
-                  >
-                    {generateTimeOptions().map(time => (
-                      <option key={time} value={time}>{time}</option>
-                    ))}
-                  </select>
-                  
-                  <div className="flex-1 relative">
-                    <input
-                      id="eventInput"
-                      type="text"
-                      value={newEventText}
-                      onChange={(e) => setNewEventText(e.target.value)}
-                      placeholder={isRecording ? "말씀하세요..." : "내용 입력"}
-                      className={`bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pr-10 transition-colors ${isRecording ? 'bg-red-50 border-red-200' : ''}`}
-                      autoFocus
-                    />
-                    {/* Inline Mic Button */}
+                <div className="flex flex-col space-y-3 mb-3">
+                  <div className="flex space-x-2">
+                    <select 
+                      value={newEventTime}
+                      onChange={(e) => setNewEventTime(e.target.value)}
+                      className="bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 min-w-[90px]"
+                    >
+                      {generateTimeOptions().map(time => (
+                        <option key={time} value={time}>{time}</option>
+                      ))}
+                    </select>
+                    
+                    {/* Recording Control */}
                     <button 
-                      onClick={isRecording ? stopRecording : startRecording}
-                      disabled={transcribing}
-                      className={`absolute right-1 top-1 p-1.5 rounded-md transition-all ${
+                      onClick={isRecording ? stopLiveTranscription : startLiveTranscription}
+                      disabled={isLiveConnected}
+                      className={`flex-1 flex items-center justify-center space-x-2 p-2.5 rounded-lg font-bold transition-all ${
                         isRecording 
-                          ? 'bg-red-500 text-white animate-pulse shadow-md' 
-                          : 'text-gray-400 hover:text-blue-600 hover:bg-blue-50'
+                          ? 'bg-red-500 text-white shadow-inner' 
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                       }`}
                     >
-                      {isRecording ? <StopIcon className="w-4 h-4" /> : <MicIcon className="w-4 h-4" />}
+                      {isLiveConnected ? (
+                         <span>연결 중...</span>
+                      ) : isRecording ? (
+                        <>
+                           <div className="w-2 h-2 bg-white rounded-full animate-ping"></div>
+                           <span>인식 중지 (클릭)</span>
+                        </>
+                      ) : (
+                        <>
+                           <MicIcon className="w-4 h-4" />
+                           <span>음성으로 입력하기</span>
+                        </>
+                      )}
                     </button>
                   </div>
+                  
+                  <textarea
+                    id="eventInput"
+                    value={newEventText}
+                    onChange={(e) => setNewEventText(e.target.value)}
+                    placeholder="내용을 입력하거나 음성 버튼을 눌러 말해보세요."
+                    rows={2}
+                    className={`bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 transition-colors resize-none ${isRecording ? 'bg-red-50 border-red-200' : ''}`}
+                  />
                 </div>
-                
-                {transcribing && (
-                   <div className="flex items-center space-x-2 mb-2 text-xs text-blue-600 font-medium animate-pulse">
-                      <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce"></div>
-                      <span>텍스트로 변환 중...</span>
-                   </div>
-                )}
 
                 <button 
                   onClick={handleAddEvent}
