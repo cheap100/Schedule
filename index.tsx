@@ -451,6 +451,7 @@ const App = () => {
           };
           
           setVoiceMemos(prev => [newMemo, ...prev]);
+          alert("음성 메모가 저장되었습니다.");
         };
         
         // Stop all tracks
@@ -548,7 +549,7 @@ const App = () => {
     const days = [];
     
     for (let i = 0; i < firstDay; i++) {
-      days.push(<div key={`empty-${i}`} className="h-28 border-r border-b border-slate-700/50"></div>);
+      days.push(<div key={`empty-${i}`} className="h-28 border-r border-b border-stone-800"></div>);
     }
     
     const today = new Date();
@@ -563,13 +564,13 @@ const App = () => {
       const hasEvents = events[dateKey]?.length > 0;
       const isTodayCell = isToday(d);
       
-      // Dark Mode Cell Styling with Grid Borders
-      let containerClass = "h-28 p-1.5 cursor-pointer transition-all duration-200 flex flex-col relative border-r border-b border-slate-700/50 ";
+      // Warm Dark Mode Cell Styling
+      let containerClass = "h-28 p-1.5 cursor-pointer transition-all duration-200 flex flex-col relative border-r border-b border-stone-800 ";
       
       if (isSelected(d)) {
-         containerClass += "bg-indigo-900/30 z-10 inset-shadow";
+         containerClass += "bg-teal-900/20 z-10 inset-shadow";
       } else {
-         containerClass += "hover:bg-slate-800/50";
+         containerClass += "hover:bg-stone-800/50";
       }
 
       days.push(
@@ -582,8 +583,8 @@ const App = () => {
             <span 
               className={`
                 text-sm w-6 h-6 flex items-center justify-center rounded-full font-semibold transition-colors
-                ${isTodayCell ? 'bg-rose-500 text-white shadow-lg shadow-rose-900/50' : 'text-slate-300'}
-                ${!isTodayCell && isSelected(d) ? 'text-indigo-400 ring-1 ring-indigo-500/50 bg-indigo-900/40' : ''}
+                ${isTodayCell ? 'bg-orange-500 text-white shadow-lg shadow-orange-900/50' : 'text-stone-400'}
+                ${!isTodayCell && isSelected(d) ? 'text-teal-400 ring-1 ring-teal-500/50 bg-teal-900/20' : ''}
               `}
             >
               {d}
@@ -596,15 +597,15 @@ const App = () => {
                 key={idx} 
                 className={`w-full px-1 py-0.5 text-[9px] font-medium rounded-sm truncate border-l-2
                   ${isTodayCell 
-                    ? 'border-rose-400 bg-rose-500/10 text-rose-200 animate-pulse' 
-                    : 'border-indigo-400 bg-indigo-500/10 text-indigo-200'}
+                    ? 'border-orange-400 bg-orange-500/10 text-orange-200 animate-pulse' 
+                    : 'border-teal-500/50 bg-teal-500/10 text-teal-200'}
                 `}
               >
                 {ev.text}
               </div>
             ))}
             {events[dateKey]?.length > 3 && (
-               <div className="text-[9px] text-slate-500">+ {events[dateKey]?.length - 3}</div>
+               <div className="text-[9px] text-stone-500">+ {events[dateKey]?.length - 3}</div>
             )}
           </div>
         </div>
@@ -629,13 +630,13 @@ const App = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 font-sans pb-20 select-none">
+    <div className="min-h-screen bg-stone-950 text-stone-200 font-sans pb-20 select-none">
       {/* Top Bar */}
-      <header className="bg-slate-900/90 backdrop-blur-md sticky top-0 z-50 border-b border-slate-800">
+      <header className="bg-stone-950/90 backdrop-blur-md sticky top-0 z-50 border-b border-stone-800">
         <div className="max-w-md mx-auto px-6 h-16 flex items-center justify-between">
           <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
              <span className="text-2xl">📅</span>
-             <span className="bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-rose-400">
+             <span className="bg-clip-text text-transparent bg-gradient-to-r from-teal-400 to-emerald-400">
                스마트 캘린더
              </span>
           </h1>
@@ -644,14 +645,14 @@ const App = () => {
              {/* Global Voice Recorder */}
             <button 
               onClick={openVoiceMemoModal} 
-              className="p-2.5 bg-slate-800 border border-slate-700 rounded-full text-slate-400 hover:text-rose-400 hover:border-rose-500/30 hover:bg-rose-900/20 transition-all active:scale-95"
+              className="p-2.5 bg-stone-900 border border-stone-800 rounded-full text-stone-400 hover:text-orange-400 hover:border-orange-500/30 hover:bg-orange-900/10 transition-all active:scale-95"
               title="음성 녹음기"
             >
               <MicIcon className="w-5 h-5" />
             </button>
 
             {/* Camera */}
-            <button onClick={handleCameraClick} className="p-2.5 bg-slate-800 border border-slate-700 rounded-full text-slate-400 hover:text-indigo-400 hover:border-indigo-500/30 hover:bg-indigo-900/20 transition-all active:scale-95 relative">
+            <button onClick={handleCameraClick} className="p-2.5 bg-stone-900 border border-stone-800 rounded-full text-stone-400 hover:text-teal-400 hover:border-teal-500/30 hover:bg-teal-900/10 transition-all active:scale-95 relative">
               <CameraIcon className="w-5 h-5" />
               <input 
                 type="file" 
@@ -671,28 +672,28 @@ const App = () => {
         
         {/* Calendar Card */}
         <div 
-          className="bg-slate-800 rounded-2xl shadow-2xl shadow-black/40 overflow-hidden ring-1 ring-slate-700"
+          className="bg-stone-900 rounded-2xl shadow-2xl shadow-black/20 overflow-hidden ring-1 ring-stone-800"
           onTouchStart={onTouchStart}
           onTouchMove={onTouchMove}
           onTouchEnd={onTouchEnd}
         >
           {/* Calendar Header */}
-          <div className="p-6 flex items-center justify-between border-b border-slate-700">
-            <button onClick={handlePrevMonth} className="p-2 hover:bg-slate-700 rounded-full transition text-slate-400 hover:text-white">
+          <div className="p-6 flex items-center justify-between border-b border-stone-800">
+            <button onClick={handlePrevMonth} className="p-2 hover:bg-stone-800 rounded-full transition text-stone-500 hover:text-stone-200">
               <ChevronLeft />
             </button>
-            <h2 className="text-xl font-bold text-white tracking-tight">
+            <h2 className="text-xl font-bold text-stone-100 tracking-tight">
               {currentDate.getFullYear()}년 {String(currentDate.getMonth() + 1).padStart(2, '0')}월
             </h2>
-            <button onClick={handleNextMonth} className="p-2 hover:bg-slate-700 rounded-full transition text-slate-400 hover:text-white">
+            <button onClick={handleNextMonth} className="p-2 hover:bg-stone-800 rounded-full transition text-stone-500 hover:text-stone-200">
               <ChevronRight />
             </button>
           </div>
           
           {/* Grid Layout */}
-          <div className="grid grid-cols-7 bg-slate-800 border-l border-t border-slate-700/50">
+          <div className="grid grid-cols-7 bg-stone-900 border-l border-t border-stone-800">
             {['일', '월', '화', '수', '목', '금', '토'].map((day, i) => (
-              <div key={day} className={`h-10 flex items-center justify-center text-xs font-bold border-r border-b border-slate-700/50 ${i===0 ? 'text-rose-400' : 'text-slate-400'}`}>
+              <div key={day} className={`h-10 flex items-center justify-center text-xs font-bold border-r border-b border-stone-800 ${i===0 ? 'text-orange-400' : 'text-stone-500'}`}>
                 {day}
               </div>
             ))}
@@ -700,7 +701,7 @@ const App = () => {
           </div>
         </div>
         
-        <div className="text-center text-xs text-slate-500 font-medium">
+        <div className="text-center text-xs text-stone-600 font-medium">
            좌우로 밀어서 달력을 이동하세요
         </div>
 
@@ -708,22 +709,22 @@ const App = () => {
 
       {/* Voice Memo Modal (Recorder) */}
       {isVoiceMemoModalOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-black/70 backdrop-blur-sm animate-fade-in" onClick={() => setIsVoiceMemoModalOpen(false)}>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-fade-in" onClick={() => setIsVoiceMemoModalOpen(false)}>
            <div 
-            className="bg-slate-800 rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden relative flex flex-col max-h-[80vh] ring-1 ring-slate-700"
+            className="bg-stone-900 rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden relative flex flex-col max-h-[80vh] ring-1 ring-stone-800"
             onClick={(e) => e.stopPropagation()}
            >
-              <div className="bg-slate-900/50 p-5 flex justify-between items-center text-white border-b border-slate-700">
+              <div className="bg-stone-950/50 p-5 flex justify-between items-center text-stone-100 border-b border-stone-800">
                  <h3 className="font-bold text-lg flex items-center gap-2">
-                   <div className="p-1.5 bg-rose-600 rounded-lg"><MicIcon className="w-4 h-4 text-white"/></div>
+                   <div className="p-1.5 bg-orange-600 rounded-lg"><MicIcon className="w-4 h-4 text-white"/></div>
                    <span>음성 메모</span>
                  </h3>
-                 <button onClick={() => setIsVoiceMemoModalOpen(false)} className="text-slate-400 hover:text-white transition"><XIcon/></button>
+                 <button onClick={() => setIsVoiceMemoModalOpen(false)} className="text-stone-500 hover:text-white transition"><XIcon/></button>
               </div>
 
               {/* Recorder Controls */}
-              <div className="p-8 bg-slate-800 flex flex-col items-center justify-center border-b border-slate-700">
-                 <div className="text-5xl font-mono font-medium text-slate-200 mb-8 tracking-tighter">
+              <div className="p-8 bg-stone-900 flex flex-col items-center justify-center border-b border-stone-800">
+                 <div className="text-5xl font-mono font-medium text-stone-200 mb-8 tracking-tighter">
                     {String(Math.floor(recordingTime / 60)).padStart(2,'0')}:{String(recordingTime % 60).padStart(2,'0')}
                  </div>
                  
@@ -731,50 +732,50 @@ const App = () => {
                     onClick={isMemoRecording ? stopMemoRecording : startMemoRecording}
                     className={`w-20 h-20 rounded-full shadow-lg flex items-center justify-center transition-all transform hover:scale-105 active:scale-95 duration-200 ${
                       isMemoRecording 
-                      ? 'bg-slate-800 border-[6px] border-rose-500 text-rose-500' 
-                      : 'bg-gradient-to-br from-rose-500 to-pink-600 text-white shadow-rose-900/50'
+                      ? 'bg-stone-900 border-[6px] border-orange-500 text-orange-500' 
+                      : 'bg-gradient-to-br from-orange-500 to-red-600 text-white shadow-orange-900/30'
                     }`}
                  >
                     {isMemoRecording ? <StopIcon className="w-8 h-8"/> : <MicIcon className="w-8 h-8"/>}
                  </button>
-                 <p className="mt-6 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                 <p className="mt-6 text-xs font-semibold uppercase tracking-wider text-stone-500">
                    {isMemoRecording ? "녹음 중입니다..." : "터치하여 녹음 시작"}
                  </p>
               </div>
 
               {/* File List */}
-              <div className="flex-1 overflow-y-auto bg-slate-900/30 p-4">
-                 <div className="px-2 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">저장된 녹음 ({voiceMemos.length})</div>
+              <div className="flex-1 overflow-y-auto bg-stone-950/30 p-4">
+                 <div className="px-2 py-2 text-[10px] font-bold text-stone-600 uppercase tracking-widest mb-2">저장된 녹음 ({voiceMemos.length})</div>
                  {voiceMemos.length === 0 ? (
                    <div className="text-center py-10 flex flex-col items-center">
-                     <div className="w-12 h-12 bg-slate-800 rounded-full flex items-center justify-center mb-3">
-                        <MicIcon className="w-6 h-6 text-slate-600" />
+                     <div className="w-12 h-12 bg-stone-800 rounded-full flex items-center justify-center mb-3">
+                        <MicIcon className="w-6 h-6 text-stone-600" />
                      </div>
-                     <div className="text-slate-500 text-sm">저장된 녹음이 없습니다</div>
+                     <div className="text-stone-600 text-sm">저장된 녹음이 없습니다</div>
                    </div>
                  ) : (
                    <ul className="space-y-3">
                      {voiceMemos.map(memo => (
-                       <li key={memo.id} className="flex items-center justify-between p-4 bg-slate-800 border border-slate-700 rounded-2xl shadow-sm hover:border-indigo-500/50 transition-all group">
+                       <li key={memo.id} className="flex items-center justify-between p-4 bg-stone-800 border border-stone-700 rounded-2xl shadow-sm hover:border-teal-500/50 transition-all group">
                           <div className="flex items-center space-x-4">
-                             <div className="bg-slate-700 p-3 rounded-xl text-slate-400 group-hover:bg-indigo-900/30 group-hover:text-indigo-400 transition-colors">
+                             <div className="bg-stone-700 p-3 rounded-xl text-stone-400 group-hover:bg-teal-900/30 group-hover:text-teal-400 transition-colors">
                                 <MicIcon className="w-5 h-5"/>
                              </div>
                              <div>
-                                <div className="text-sm font-bold text-slate-200">{memo.dateStr}</div>
-                                <div className="text-xs text-slate-500 font-medium mt-0.5">{memo.timeStr} • <span className="text-slate-400">{memo.durationStr}</span></div>
+                                <div className="text-sm font-bold text-stone-200">{memo.dateStr}</div>
+                                <div className="text-xs text-stone-500 font-medium mt-0.5">{memo.timeStr} • <span className="text-stone-400">{memo.durationStr}</span></div>
                              </div>
                           </div>
                           <div className="flex items-center space-x-2">
                              <button 
                                 onClick={() => playMemo(memo)}
-                                className={`p-2.5 rounded-full transition-all ${playingMemoId === memo.id ? 'bg-rose-900/30 text-rose-400' : 'bg-slate-700 text-slate-400 hover:bg-indigo-600 hover:text-white'}`}
+                                className={`p-2.5 rounded-full transition-all ${playingMemoId === memo.id ? 'bg-orange-900/30 text-orange-400' : 'bg-stone-700 text-stone-400 hover:bg-teal-600 hover:text-white'}`}
                              >
                                 {playingMemoId === memo.id ? <PauseIcon/> : <PlayIcon/>}
                              </button>
                              <button 
                                 onClick={() => deleteMemo(memo.id)}
-                                className="p-2.5 rounded-full text-slate-600 hover:text-rose-400 hover:bg-rose-900/20 transition"
+                                className="p-2.5 rounded-full text-stone-600 hover:text-orange-400 hover:bg-orange-900/10 transition"
                              >
                                 <TrashIcon/>
                              </button>
@@ -790,22 +791,22 @@ const App = () => {
 
       {/* Event Input Modal */}
       {isEventModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in" onClick={closeEventModal}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fade-in" onClick={closeEventModal}>
           <div 
-            className="bg-slate-800 rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all scale-100 relative ring-1 ring-slate-700"
+            className="bg-stone-900 rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all scale-100 relative ring-1 ring-stone-800"
             onClick={(e) => e.stopPropagation()}
           >
              {/* Modal Header */}
-            <div className="bg-gradient-to-r from-indigo-900 to-slate-900 px-6 py-5 flex justify-between items-center shadow-lg border-b border-indigo-900/50">
+            <div className="bg-gradient-to-r from-teal-900/80 to-stone-900 px-6 py-5 flex justify-between items-center shadow-lg border-b border-teal-900/30">
                <div>
-                  <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-widest block mb-1">선택된 날짜</span>
+                  <span className="text-[10px] font-bold text-teal-300 uppercase tracking-widest block mb-1">선택된 날짜</span>
                   <div className="flex items-center space-x-2">
                     <h3 className="text-2xl font-bold text-white tracking-tight">
                       {selectedDate.getMonth() + 1}월 {selectedDate.getDate()}일
                     </h3>
                     <button 
                       onClick={() => speakSchedule(selectedDate, events[formatDate(selectedDate)])}
-                      className="text-slate-400 hover:text-white transition p-1.5 rounded-full hover:bg-white/10"
+                      className="text-stone-400 hover:text-white transition p-1.5 rounded-full hover:bg-white/10"
                       title="듣기"
                     >
                       <SpeakerIcon />
@@ -814,7 +815,7 @@ const App = () => {
                </div>
                <button 
                   onClick={closeEventModal}
-                  className="bg-white/5 hover:bg-white/10 text-slate-300 rounded-full p-2 transition backdrop-blur-sm"
+                  className="bg-white/5 hover:bg-white/10 text-stone-300 rounded-full p-2 transition backdrop-blur-sm"
                >
                  <XIcon />
                </button>
@@ -824,22 +825,22 @@ const App = () => {
               {/* Event List */}
               <div className="space-y-3 mb-8 max-h-[40vh] overflow-y-auto pr-1">
                 {(!events[formatDate(selectedDate)] || events[formatDate(selectedDate)].length === 0) ? (
-                  <div className="text-center py-8 bg-slate-900/30 rounded-2xl border-2 border-dashed border-slate-700">
-                    <p className="text-slate-400 text-sm font-medium">일정이 없습니다.</p>
-                    <p className="text-slate-500 text-xs mt-1">새로운 일정을 추가해보세요!</p>
+                  <div className="text-center py-8 bg-stone-950/30 rounded-2xl border-2 border-dashed border-stone-800">
+                    <p className="text-stone-500 text-sm font-medium">일정이 없습니다.</p>
+                    <p className="text-stone-600 text-xs mt-1">새로운 일정을 추가해보세요!</p>
                   </div>
                 ) : (
                   events[formatDate(selectedDate)].map(event => (
-                    <div key={event.id} className="flex items-center justify-between p-3.5 bg-slate-700/30 rounded-xl border border-slate-700 shadow-sm hover:border-indigo-500/30 hover:shadow-md transition-all group">
+                    <div key={event.id} className="flex items-center justify-between p-3.5 bg-stone-800/50 rounded-xl border border-stone-800 shadow-sm hover:border-teal-500/30 hover:shadow-md transition-all group">
                       <div className="flex items-center space-x-3 overflow-hidden">
-                        <span className={`text-xs font-bold px-2.5 py-1 rounded-md ${event.alerted ? 'bg-slate-600 text-slate-400' : 'bg-indigo-900/50 text-indigo-300'}`}>
+                        <span className={`text-xs font-bold px-2.5 py-1 rounded-md ${event.alerted ? 'bg-stone-700 text-stone-400' : 'bg-teal-900/30 text-teal-300'}`}>
                           {event.time}
                         </span>
-                        <span className="text-slate-200 text-sm font-medium truncate">{event.text}</span>
+                        <span className="text-stone-200 text-sm font-medium truncate">{event.text}</span>
                       </div>
                       <button 
                         onClick={() => handleDeleteEvent(event.id)}
-                        className="text-slate-500 hover:text-rose-400 p-2 rounded-full hover:bg-rose-900/20 transition opacity-0 group-hover:opacity-100"
+                        className="text-stone-500 hover:text-orange-400 p-2 rounded-full hover:bg-orange-900/10 transition opacity-0 group-hover:opacity-100"
                       >
                         <TrashIcon />
                       </button>
@@ -849,18 +850,18 @@ const App = () => {
               </div>
 
               {/* Add Event Form */}
-              <div className="border-t border-slate-700 pt-6">
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 flex justify-between items-center">
+              <div className="border-t border-stone-800 pt-6">
+                <label className="block text-xs font-bold text-stone-500 uppercase tracking-wider mb-3 flex justify-between items-center">
                   <span>새 일정</span>
                   {/* Status */}
                   {isEventRecording && (
                     <div className="flex items-center space-x-2">
-                       <span className="text-rose-400 text-xs animate-pulse font-bold">● 듣는 중...</span>
+                       <span className="text-orange-400 text-xs animate-pulse font-bold">● 듣는 중...</span>
                        {/* Wave animation using CSS bars */}
                        <div className="flex items-end space-x-0.5 h-3">
-                          <div className="w-1 bg-rose-500 rounded-full animate-wave-1"></div>
-                          <div className="w-1 bg-rose-500 rounded-full animate-wave-2"></div>
-                          <div className="w-1 bg-rose-500 rounded-full animate-wave-3"></div>
+                          <div className="w-1 bg-orange-500 rounded-full animate-wave-1"></div>
+                          <div className="w-1 bg-orange-500 rounded-full animate-wave-2"></div>
+                          <div className="w-1 bg-orange-500 rounded-full animate-wave-3"></div>
                        </div>
                     </div>
                   )}
@@ -871,13 +872,13 @@ const App = () => {
                       <select 
                         value={newEventTime}
                         onChange={(e) => setNewEventTime(e.target.value)}
-                        className="appearance-none bg-slate-900 border border-slate-600 text-slate-200 text-sm font-semibold rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 block p-3 pr-8 min-w-[100px]"
+                        className="appearance-none bg-stone-950 border border-stone-700 text-stone-200 text-sm font-semibold rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-teal-500 block p-3 pr-8 min-w-[100px]"
                       >
                         {generateTimeOptions().map(time => (
                           <option key={time} value={time}>{time}</option>
                         ))}
                       </select>
-                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
+                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-stone-500">
                         <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
                       </div>
                     </div>
@@ -887,8 +888,8 @@ const App = () => {
                       onClick={toggleVoiceRecording}
                       className={`flex-1 flex items-center justify-center space-x-2 p-3 rounded-xl font-bold transition-all ${
                         isEventRecording 
-                          ? 'bg-rose-600 text-white shadow-lg shadow-rose-900/50 ring-2 ring-rose-400' 
-                          : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                          ? 'bg-orange-600 text-white shadow-lg shadow-orange-900/50 ring-2 ring-orange-400' 
+                          : 'bg-stone-800 text-stone-300 hover:bg-stone-700'
                       }`}
                     >
                       {isEventRecording ? (
@@ -911,13 +912,13 @@ const App = () => {
                     onChange={(e) => setNewEventText(e.target.value)}
                     placeholder="일정 내용을 입력하거나 음성을 사용하세요..."
                     rows={2}
-                    className={`bg-slate-900 border border-slate-600 text-slate-100 text-sm font-medium rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 block w-full p-3 transition-colors resize-none placeholder-slate-500 ${isEventRecording ? 'bg-rose-900/20 border-rose-500/50 placeholder-rose-400/50' : ''}`}
+                    className={`bg-stone-950 border border-stone-700 text-stone-100 text-sm font-medium rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-teal-500 block w-full p-3 transition-colors resize-none placeholder-stone-600 ${isEventRecording ? 'bg-orange-900/10 border-orange-500/50 placeholder-orange-400/50' : ''}`}
                   />
                 </div>
 
                 <button 
                   onClick={handleAddEvent}
-                  className="w-full text-white bg-indigo-600 hover:bg-indigo-700 focus:ring-4 focus:ring-indigo-900 font-bold rounded-xl text-sm px-5 py-4 text-center shadow-lg shadow-indigo-900/50 transition-all transform hover:scale-[1.02] active:scale-95"
+                  className="w-full text-white bg-teal-600 hover:bg-teal-700 focus:ring-4 focus:ring-teal-900 font-bold rounded-xl text-sm px-5 py-4 text-center shadow-lg shadow-teal-900/50 transition-all transform hover:scale-[1.02] active:scale-95"
                 >
                   일정 저장
                 </button>
@@ -929,23 +930,23 @@ const App = () => {
 
       {/* Alarm Modal */}
       {alarmActive && (
-        <div className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center z-[100] p-4 animate-fade-in">
-          <div className="bg-slate-800 rounded-[2rem] shadow-2xl p-8 max-w-sm w-full text-center relative overflow-hidden ring-4 ring-rose-500/30">
-            <div className="w-24 h-24 bg-rose-900/30 rounded-full flex items-center justify-center mx-auto mb-6 text-rose-500 animate-bounce shadow-inner">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[100] p-4 animate-fade-in">
+          <div className="bg-stone-900 rounded-[2rem] shadow-2xl p-8 max-w-sm w-full text-center relative overflow-hidden ring-4 ring-orange-500/30">
+            <div className="w-24 h-24 bg-orange-900/20 rounded-full flex items-center justify-center mx-auto mb-6 text-orange-500 animate-bounce shadow-inner">
                <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                </svg>
             </div>
             <h3 className="text-4xl font-extrabold text-white mb-1 tracking-tight">{alarmActive.time}</h3>
-            <p className="text-rose-500 uppercase text-[10px] font-black tracking-[0.2em] mb-6">알람 울림</p>
-            <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-700 mb-8 shadow-inner">
-               <p className="text-lg font-medium text-slate-200 break-keep leading-relaxed">
+            <p className="text-orange-500 uppercase text-[10px] font-black tracking-[0.2em] mb-6">알람 울림</p>
+            <div className="bg-stone-950/50 p-6 rounded-2xl border border-stone-800 mb-8 shadow-inner">
+               <p className="text-lg font-medium text-stone-200 break-keep leading-relaxed">
                   "{alarmActive.text}"
                </p>
             </div>
             <button 
               onClick={stopAlarm}
-              className="w-full text-white bg-rose-600 hover:bg-rose-700 font-bold rounded-2xl text-lg px-6 py-4 shadow-xl shadow-rose-900/50 transition transform hover:scale-[1.02] active:scale-95"
+              className="w-full text-white bg-orange-600 hover:bg-orange-700 font-bold rounded-2xl text-lg px-6 py-4 shadow-xl shadow-orange-900/50 transition transform hover:scale-[1.02] active:scale-95"
             >
               알람 끄기
             </button>
