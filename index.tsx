@@ -194,6 +194,11 @@ const App = () => {
     // Player for voice memos
     audioPlayerRef.current = new Audio();
     audioPlayerRef.current.onended = () => setPlayingMemoId(null);
+    audioPlayerRef.current.onerror = (e) => {
+      console.error("Audio playback error", e);
+      setPlayingMemoId(null);
+      alert("재생 중 오류가 발생했습니다.");
+    };
   }, []);
 
   // --- TTS Function ---
@@ -404,18 +409,25 @@ const App = () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
-      // Optimize options for voice (smaller file size)
+      // Smart MIME type detection
+      let mimeType = 'audio/webm';
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+         mimeType = 'audio/webm;codecs=opus';
+      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+         mimeType = 'audio/mp4'; // Safari often supports mp4
+      }
+
+      // Optimize options for voice
       const options = {
-         mimeType: 'audio/webm',
-         audioBitsPerSecond: 32000 // 32kbps is sufficient for voice and produces small files like MP3
+         mimeType: mimeType,
+         audioBitsPerSecond: 32000
       };
       
-      // Check if browser supports the options
       let mediaRecorder;
       try {
         mediaRecorder = new MediaRecorder(stream, options);
       } catch (e) {
-        // Fallback for Safari/others if specific options fail
+        // Fallback: let browser decide
         mediaRecorder = new MediaRecorder(stream);
       }
 
@@ -429,12 +441,15 @@ const App = () => {
       };
 
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        // Use the recorder's actual mime type to ensure playback compatibility
+        const finalMimeType = mediaRecorder.mimeType || 'audio/webm';
+        const audioBlob = new Blob(audioChunksRef.current, { type: finalMimeType });
+        
         const reader = new FileReader();
         reader.readAsDataURL(audioBlob);
         reader.onloadend = () => {
           const base64data = reader.result as string;
-          // Create Memo Object
+          
           const now = new Date();
           const durationSec = recordingTime;
           const mins = Math.floor(durationSec / 60);
@@ -454,7 +469,6 @@ const App = () => {
           alert("음성 메모가 저장되었습니다.");
         };
         
-        // Stop all tracks
         stream.getTracks().forEach(track => track.stop());
       };
 
@@ -483,20 +497,27 @@ const App = () => {
     }
   };
 
-  const playMemo = (memo: VoiceMemo) => {
+  const playMemo = async (memo: VoiceMemo) => {
     if (playingMemoId === memo.id) {
        audioPlayerRef.current?.pause();
        setPlayingMemoId(null);
     } else {
        if (audioPlayerRef.current) {
-         audioPlayerRef.current.src = memo.audioData;
-         audioPlayerRef.current.play();
-         setPlayingMemoId(memo.id);
+         try {
+           audioPlayerRef.current.src = memo.audioData;
+           await audioPlayerRef.current.play();
+           setPlayingMemoId(memo.id);
+         } catch(e) {
+           console.error("Playback failed", e);
+           alert("재생할 수 없는 형식입니다.");
+           setPlayingMemoId(null);
+         }
        }
     }
   };
 
-  const deleteMemo = (id: string) => {
+  const deleteMemo = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
     if (confirm("이 음성 메모를 삭제하시겠습니까?")) {
       setVoiceMemos(prev => prev.filter(m => m.id !== id));
       if (playingMemoId === id) {
@@ -549,7 +570,7 @@ const App = () => {
     const days = [];
     
     for (let i = 0; i < firstDay; i++) {
-      days.push(<div key={`empty-${i}`} className="h-28 border-r border-b border-stone-800"></div>);
+      days.push(<div key={`empty-${i}`} className="h-28 border-r border-b border-gray-100 bg-gray-50/30"></div>);
     }
     
     const today = new Date();
@@ -564,13 +585,13 @@ const App = () => {
       const hasEvents = events[dateKey]?.length > 0;
       const isTodayCell = isToday(d);
       
-      // Warm Dark Mode Cell Styling
-      let containerClass = "h-28 p-1.5 cursor-pointer transition-all duration-200 flex flex-col relative border-r border-b border-stone-800 ";
+      // Light Mode Cell Styling
+      let containerClass = "h-28 p-1.5 cursor-pointer transition-all duration-200 flex flex-col relative border-r border-b border-gray-100 ";
       
       if (isSelected(d)) {
-         containerClass += "bg-teal-900/20 z-10 inset-shadow";
+         containerClass += "bg-teal-50 z-10 ring-2 ring-inset ring-teal-100";
       } else {
-         containerClass += "hover:bg-stone-800/50";
+         containerClass += "hover:bg-gray-50 bg-white";
       }
 
       days.push(
@@ -583,8 +604,8 @@ const App = () => {
             <span 
               className={`
                 text-sm w-6 h-6 flex items-center justify-center rounded-full font-semibold transition-colors
-                ${isTodayCell ? 'bg-orange-500 text-white shadow-lg shadow-orange-900/50' : 'text-stone-400'}
-                ${!isTodayCell && isSelected(d) ? 'text-teal-400 ring-1 ring-teal-500/50 bg-teal-900/20' : ''}
+                ${isTodayCell ? 'bg-orange-500 text-white shadow-md shadow-orange-200' : 'text-gray-700'}
+                ${!isTodayCell && isSelected(d) ? 'text-teal-700 font-bold' : ''}
               `}
             >
               {d}
@@ -595,17 +616,17 @@ const App = () => {
              {events[dateKey]?.slice(0, 3).map((ev, idx) => (
               <div 
                 key={idx} 
-                className={`w-full px-1 py-0.5 text-[9px] font-medium rounded-sm truncate border-l-2
+                className={`w-full px-1.5 py-0.5 text-[10px] font-medium rounded-sm truncate border-l-2
                   ${isTodayCell 
-                    ? 'border-orange-400 bg-orange-500/10 text-orange-200 animate-pulse' 
-                    : 'border-teal-500/50 bg-teal-500/10 text-teal-200'}
+                    ? 'border-orange-400 bg-orange-50 text-orange-800 animate-pulse' 
+                    : 'border-teal-300 bg-teal-50 text-teal-800'}
                 `}
               >
                 {ev.text}
               </div>
             ))}
             {events[dateKey]?.length > 3 && (
-               <div className="text-[9px] text-stone-500">+ {events[dateKey]?.length - 3}</div>
+               <div className="text-[10px] text-gray-400">+ {events[dateKey]?.length - 3}</div>
             )}
           </div>
         </div>
@@ -630,13 +651,13 @@ const App = () => {
   }
 
   return (
-    <div className="min-h-screen bg-stone-950 text-stone-200 font-sans pb-20 select-none">
+    <div className="min-h-screen bg-gray-50 text-gray-800 font-sans pb-20 select-none">
       {/* Top Bar */}
-      <header className="bg-stone-950/90 backdrop-blur-md sticky top-0 z-50 border-b border-stone-800">
+      <header className="bg-white/90 backdrop-blur-md sticky top-0 z-50 border-b border-gray-200 shadow-sm">
         <div className="max-w-md mx-auto px-6 h-16 flex items-center justify-between">
-          <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
+          <h1 className="text-xl font-bold text-gray-900 tracking-tight flex items-center gap-2">
              <span className="text-2xl">📅</span>
-             <span className="bg-clip-text text-transparent bg-gradient-to-r from-teal-400 to-emerald-400">
+             <span className="bg-clip-text text-transparent bg-gradient-to-r from-teal-600 to-emerald-600">
                스마트 캘린더
              </span>
           </h1>
@@ -645,14 +666,14 @@ const App = () => {
              {/* Global Voice Recorder */}
             <button 
               onClick={openVoiceMemoModal} 
-              className="p-2.5 bg-stone-900 border border-stone-800 rounded-full text-stone-400 hover:text-orange-400 hover:border-orange-500/30 hover:bg-orange-900/10 transition-all active:scale-95"
+              className="p-2.5 bg-white border border-gray-200 rounded-full text-gray-500 hover:text-orange-500 hover:border-orange-200 hover:bg-orange-50 transition-all active:scale-95 shadow-sm"
               title="음성 녹음기"
             >
               <MicIcon className="w-5 h-5" />
             </button>
 
             {/* Camera */}
-            <button onClick={handleCameraClick} className="p-2.5 bg-stone-900 border border-stone-800 rounded-full text-stone-400 hover:text-teal-400 hover:border-teal-500/30 hover:bg-teal-900/10 transition-all active:scale-95 relative">
+            <button onClick={handleCameraClick} className="p-2.5 bg-white border border-gray-200 rounded-full text-gray-500 hover:text-teal-600 hover:border-teal-200 hover:bg-teal-50 transition-all active:scale-95 shadow-sm relative">
               <CameraIcon className="w-5 h-5" />
               <input 
                 type="file" 
@@ -672,28 +693,28 @@ const App = () => {
         
         {/* Calendar Card */}
         <div 
-          className="bg-stone-900 rounded-2xl shadow-2xl shadow-black/20 overflow-hidden ring-1 ring-stone-800"
+          className="bg-white rounded-2xl shadow-xl shadow-gray-200/50 overflow-hidden ring-1 ring-gray-100"
           onTouchStart={onTouchStart}
           onTouchMove={onTouchMove}
           onTouchEnd={onTouchEnd}
         >
           {/* Calendar Header */}
-          <div className="p-6 flex items-center justify-between border-b border-stone-800">
-            <button onClick={handlePrevMonth} className="p-2 hover:bg-stone-800 rounded-full transition text-stone-500 hover:text-stone-200">
+          <div className="p-6 flex items-center justify-between border-b border-gray-100 bg-white">
+            <button onClick={handlePrevMonth} className="p-2 hover:bg-gray-100 rounded-full transition text-gray-400 hover:text-gray-800">
               <ChevronLeft />
             </button>
-            <h2 className="text-xl font-bold text-stone-100 tracking-tight">
+            <h2 className="text-xl font-bold text-gray-800 tracking-tight">
               {currentDate.getFullYear()}년 {String(currentDate.getMonth() + 1).padStart(2, '0')}월
             </h2>
-            <button onClick={handleNextMonth} className="p-2 hover:bg-stone-800 rounded-full transition text-stone-500 hover:text-stone-200">
+            <button onClick={handleNextMonth} className="p-2 hover:bg-gray-100 rounded-full transition text-gray-400 hover:text-gray-800">
               <ChevronRight />
             </button>
           </div>
           
           {/* Grid Layout */}
-          <div className="grid grid-cols-7 bg-stone-900 border-l border-t border-stone-800">
+          <div className="grid grid-cols-7 bg-white border-l border-t border-gray-100">
             {['일', '월', '화', '수', '목', '금', '토'].map((day, i) => (
-              <div key={day} className={`h-10 flex items-center justify-center text-xs font-bold border-r border-b border-stone-800 ${i===0 ? 'text-orange-400' : 'text-stone-500'}`}>
+              <div key={day} className={`h-10 flex items-center justify-center text-xs font-bold border-r border-b border-gray-100 ${i===0 ? 'text-red-500' : 'text-gray-500'}`}>
                 {day}
               </div>
             ))}
@@ -701,7 +722,7 @@ const App = () => {
           </div>
         </div>
         
-        <div className="text-center text-xs text-stone-600 font-medium">
+        <div className="text-center text-xs text-gray-400 font-medium">
            좌우로 밀어서 달력을 이동하세요
         </div>
 
@@ -709,73 +730,78 @@ const App = () => {
 
       {/* Voice Memo Modal (Recorder) */}
       {isVoiceMemoModalOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-fade-in" onClick={() => setIsVoiceMemoModalOpen(false)}>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-black/40 backdrop-blur-sm animate-fade-in" onClick={() => setIsVoiceMemoModalOpen(false)}>
            <div 
-            className="bg-stone-900 rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden relative flex flex-col max-h-[80vh] ring-1 ring-stone-800"
+            className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden relative flex flex-col max-h-[80vh] ring-1 ring-gray-200"
             onClick={(e) => e.stopPropagation()}
            >
-              <div className="bg-stone-950/50 p-5 flex justify-between items-center text-stone-100 border-b border-stone-800">
+              <div className="bg-gray-50/80 p-5 flex justify-between items-center text-gray-800 border-b border-gray-100">
                  <h3 className="font-bold text-lg flex items-center gap-2">
-                   <div className="p-1.5 bg-orange-600 rounded-lg"><MicIcon className="w-4 h-4 text-white"/></div>
+                   <div className="p-1.5 bg-orange-500 rounded-lg text-white"><MicIcon className="w-4 h-4"/></div>
                    <span>음성 메모</span>
                  </h3>
-                 <button onClick={() => setIsVoiceMemoModalOpen(false)} className="text-stone-500 hover:text-white transition"><XIcon/></button>
+                 <button onClick={() => setIsVoiceMemoModalOpen(false)} className="text-gray-400 hover:text-gray-800 transition"><XIcon/></button>
               </div>
 
               {/* Recorder Controls */}
-              <div className="p-8 bg-stone-900 flex flex-col items-center justify-center border-b border-stone-800">
-                 <div className="text-5xl font-mono font-medium text-stone-200 mb-8 tracking-tighter">
+              <div className="p-8 bg-white flex flex-col items-center justify-center border-b border-gray-100">
+                 <div className="text-5xl font-mono font-medium text-gray-800 mb-8 tracking-tighter">
                     {String(Math.floor(recordingTime / 60)).padStart(2,'0')}:{String(recordingTime % 60).padStart(2,'0')}
                  </div>
                  
                  <button 
                     onClick={isMemoRecording ? stopMemoRecording : startMemoRecording}
-                    className={`w-20 h-20 rounded-full shadow-lg flex items-center justify-center transition-all transform hover:scale-105 active:scale-95 duration-200 ${
+                    className={`w-20 h-20 rounded-full shadow-xl flex items-center justify-center transition-all transform hover:scale-105 active:scale-95 duration-200 ${
                       isMemoRecording 
-                      ? 'bg-stone-900 border-[6px] border-orange-500 text-orange-500' 
-                      : 'bg-gradient-to-br from-orange-500 to-red-600 text-white shadow-orange-900/30'
+                      ? 'bg-white border-[6px] border-orange-500 text-orange-500' 
+                      : 'bg-gradient-to-br from-orange-500 to-red-500 text-white shadow-orange-200'
                     }`}
                  >
                     {isMemoRecording ? <StopIcon className="w-8 h-8"/> : <MicIcon className="w-8 h-8"/>}
                  </button>
-                 <p className="mt-6 text-xs font-semibold uppercase tracking-wider text-stone-500">
+                 <p className="mt-6 text-xs font-semibold uppercase tracking-wider text-gray-400">
                    {isMemoRecording ? "녹음 중입니다..." : "터치하여 녹음 시작"}
                  </p>
               </div>
 
               {/* File List */}
-              <div className="flex-1 overflow-y-auto bg-stone-950/30 p-4">
-                 <div className="px-2 py-2 text-[10px] font-bold text-stone-600 uppercase tracking-widest mb-2">저장된 녹음 ({voiceMemos.length})</div>
+              <div className="flex-1 overflow-y-auto bg-gray-50 p-4">
+                 <div className="px-2 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2 flex justify-between">
+                    <span>저장된 녹음 ({voiceMemos.length})</span>
+                    <span className="text-teal-600 font-normal">목록을 눌러 재생하세요</span>
+                 </div>
                  {voiceMemos.length === 0 ? (
                    <div className="text-center py-10 flex flex-col items-center">
-                     <div className="w-12 h-12 bg-stone-800 rounded-full flex items-center justify-center mb-3">
-                        <MicIcon className="w-6 h-6 text-stone-600" />
+                     <div className="w-12 h-12 bg-gray-200 rounded-full flex items-center justify-center mb-3">
+                        <MicIcon className="w-6 h-6 text-gray-400" />
                      </div>
-                     <div className="text-stone-600 text-sm">저장된 녹음이 없습니다</div>
+                     <div className="text-gray-400 text-sm">저장된 녹음이 없습니다</div>
                    </div>
                  ) : (
                    <ul className="space-y-3">
                      {voiceMemos.map(memo => (
-                       <li key={memo.id} className="flex items-center justify-between p-4 bg-stone-800 border border-stone-700 rounded-2xl shadow-sm hover:border-teal-500/50 transition-all group">
+                       <li 
+                          key={memo.id} 
+                          onClick={() => playMemo(memo)}
+                          className={`flex items-center justify-between p-4 rounded-2xl shadow-sm border transition-all cursor-pointer group active:scale-[0.98]
+                            ${playingMemoId === memo.id 
+                                ? 'bg-orange-50 border-orange-200 ring-1 ring-orange-200' 
+                                : 'bg-white border-gray-100 hover:border-teal-200 hover:shadow-md'}
+                          `}
+                        >
                           <div className="flex items-center space-x-4">
-                             <div className="bg-stone-700 p-3 rounded-xl text-stone-400 group-hover:bg-teal-900/30 group-hover:text-teal-400 transition-colors">
-                                <MicIcon className="w-5 h-5"/>
+                             <div className={`p-3 rounded-xl transition-colors ${playingMemoId === memo.id ? 'bg-orange-200 text-orange-700' : 'bg-gray-100 text-gray-400 group-hover:bg-teal-50 group-hover:text-teal-600'}`}>
+                                {playingMemoId === memo.id ? <PlayIcon className="w-5 h-5 animate-pulse"/> : <MicIcon className="w-5 h-5"/>}
                              </div>
                              <div>
-                                <div className="text-sm font-bold text-stone-200">{memo.dateStr}</div>
-                                <div className="text-xs text-stone-500 font-medium mt-0.5">{memo.timeStr} • <span className="text-stone-400">{memo.durationStr}</span></div>
+                                <div className={`text-sm font-bold ${playingMemoId === memo.id ? 'text-orange-900' : 'text-gray-800'}`}>{memo.dateStr}</div>
+                                <div className="text-xs text-gray-500 font-medium mt-0.5">{memo.timeStr} • <span className="text-gray-400">{memo.durationStr}</span></div>
                              </div>
                           </div>
                           <div className="flex items-center space-x-2">
                              <button 
-                                onClick={() => playMemo(memo)}
-                                className={`p-2.5 rounded-full transition-all ${playingMemoId === memo.id ? 'bg-orange-900/30 text-orange-400' : 'bg-stone-700 text-stone-400 hover:bg-teal-600 hover:text-white'}`}
-                             >
-                                {playingMemoId === memo.id ? <PauseIcon/> : <PlayIcon/>}
-                             </button>
-                             <button 
-                                onClick={() => deleteMemo(memo.id)}
-                                className="p-2.5 rounded-full text-stone-600 hover:text-orange-400 hover:bg-orange-900/10 transition"
+                                onClick={(e) => deleteMemo(e, memo.id)}
+                                className="p-2.5 rounded-full text-gray-400 hover:text-red-500 hover:bg-red-50 transition"
                              >
                                 <TrashIcon/>
                              </button>
@@ -791,22 +817,22 @@ const App = () => {
 
       {/* Event Input Modal */}
       {isEventModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fade-in" onClick={closeEventModal}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-md animate-fade-in" onClick={closeEventModal}>
           <div 
-            className="bg-stone-900 rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all scale-100 relative ring-1 ring-stone-800"
+            className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all scale-100 relative ring-1 ring-gray-200"
             onClick={(e) => e.stopPropagation()}
           >
              {/* Modal Header */}
-            <div className="bg-gradient-to-r from-teal-900/80 to-stone-900 px-6 py-5 flex justify-between items-center shadow-lg border-b border-teal-900/30">
+            <div className="bg-gradient-to-r from-teal-600 to-emerald-600 px-6 py-5 flex justify-between items-center shadow-md">
                <div>
-                  <span className="text-[10px] font-bold text-teal-300 uppercase tracking-widest block mb-1">선택된 날짜</span>
+                  <span className="text-[10px] font-bold text-teal-100 uppercase tracking-widest block mb-1">선택된 날짜</span>
                   <div className="flex items-center space-x-2">
                     <h3 className="text-2xl font-bold text-white tracking-tight">
                       {selectedDate.getMonth() + 1}월 {selectedDate.getDate()}일
                     </h3>
                     <button 
                       onClick={() => speakSchedule(selectedDate, events[formatDate(selectedDate)])}
-                      className="text-stone-400 hover:text-white transition p-1.5 rounded-full hover:bg-white/10"
+                      className="text-teal-100 hover:text-white transition p-1.5 rounded-full hover:bg-white/20"
                       title="듣기"
                     >
                       <SpeakerIcon />
@@ -815,7 +841,7 @@ const App = () => {
                </div>
                <button 
                   onClick={closeEventModal}
-                  className="bg-white/5 hover:bg-white/10 text-stone-300 rounded-full p-2 transition backdrop-blur-sm"
+                  className="bg-white/10 hover:bg-white/20 text-white rounded-full p-2 transition backdrop-blur-sm"
                >
                  <XIcon />
                </button>
@@ -825,22 +851,22 @@ const App = () => {
               {/* Event List */}
               <div className="space-y-3 mb-8 max-h-[40vh] overflow-y-auto pr-1">
                 {(!events[formatDate(selectedDate)] || events[formatDate(selectedDate)].length === 0) ? (
-                  <div className="text-center py-8 bg-stone-950/30 rounded-2xl border-2 border-dashed border-stone-800">
-                    <p className="text-stone-500 text-sm font-medium">일정이 없습니다.</p>
-                    <p className="text-stone-600 text-xs mt-1">새로운 일정을 추가해보세요!</p>
+                  <div className="text-center py-8 bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200">
+                    <p className="text-gray-500 text-sm font-medium">일정이 없습니다.</p>
+                    <p className="text-gray-400 text-xs mt-1">새로운 일정을 추가해보세요!</p>
                   </div>
                 ) : (
                   events[formatDate(selectedDate)].map(event => (
-                    <div key={event.id} className="flex items-center justify-between p-3.5 bg-stone-800/50 rounded-xl border border-stone-800 shadow-sm hover:border-teal-500/30 hover:shadow-md transition-all group">
+                    <div key={event.id} className="flex items-center justify-between p-3.5 bg-white rounded-xl border border-gray-100 shadow-sm hover:border-teal-200 hover:shadow-md transition-all group">
                       <div className="flex items-center space-x-3 overflow-hidden">
-                        <span className={`text-xs font-bold px-2.5 py-1 rounded-md ${event.alerted ? 'bg-stone-700 text-stone-400' : 'bg-teal-900/30 text-teal-300'}`}>
+                        <span className={`text-xs font-bold px-2.5 py-1 rounded-md ${event.alerted ? 'bg-gray-100 text-gray-500' : 'bg-teal-50 text-teal-700'}`}>
                           {event.time}
                         </span>
-                        <span className="text-stone-200 text-sm font-medium truncate">{event.text}</span>
+                        <span className="text-gray-800 text-sm font-medium truncate">{event.text}</span>
                       </div>
                       <button 
                         onClick={() => handleDeleteEvent(event.id)}
-                        className="text-stone-500 hover:text-orange-400 p-2 rounded-full hover:bg-orange-900/10 transition opacity-0 group-hover:opacity-100"
+                        className="text-gray-400 hover:text-red-500 p-2 rounded-full hover:bg-red-50 transition opacity-0 group-hover:opacity-100"
                       >
                         <TrashIcon />
                       </button>
@@ -850,14 +876,13 @@ const App = () => {
               </div>
 
               {/* Add Event Form */}
-              <div className="border-t border-stone-800 pt-6">
-                <label className="block text-xs font-bold text-stone-500 uppercase tracking-wider mb-3 flex justify-between items-center">
+              <div className="border-t border-gray-100 pt-6">
+                <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex justify-between items-center">
                   <span>새 일정</span>
                   {/* Status */}
                   {isEventRecording && (
                     <div className="flex items-center space-x-2">
-                       <span className="text-orange-400 text-xs animate-pulse font-bold">● 듣는 중...</span>
-                       {/* Wave animation using CSS bars */}
+                       <span className="text-orange-500 text-xs animate-pulse font-bold">● 듣는 중...</span>
                        <div className="flex items-end space-x-0.5 h-3">
                           <div className="w-1 bg-orange-500 rounded-full animate-wave-1"></div>
                           <div className="w-1 bg-orange-500 rounded-full animate-wave-2"></div>
@@ -872,13 +897,13 @@ const App = () => {
                       <select 
                         value={newEventTime}
                         onChange={(e) => setNewEventTime(e.target.value)}
-                        className="appearance-none bg-stone-950 border border-stone-700 text-stone-200 text-sm font-semibold rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-teal-500 block p-3 pr-8 min-w-[100px]"
+                        className="appearance-none bg-gray-50 border border-gray-200 text-gray-800 text-sm font-semibold rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-teal-500 block p-3 pr-8 min-w-[100px]"
                       >
                         {generateTimeOptions().map(time => (
                           <option key={time} value={time}>{time}</option>
                         ))}
                       </select>
-                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-stone-500">
+                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
                         <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
                       </div>
                     </div>
@@ -888,8 +913,8 @@ const App = () => {
                       onClick={toggleVoiceRecording}
                       className={`flex-1 flex items-center justify-center space-x-2 p-3 rounded-xl font-bold transition-all ${
                         isEventRecording 
-                          ? 'bg-orange-600 text-white shadow-lg shadow-orange-900/50 ring-2 ring-orange-400' 
-                          : 'bg-stone-800 text-stone-300 hover:bg-stone-700'
+                          ? 'bg-orange-500 text-white shadow-lg shadow-orange-200 ring-2 ring-orange-300' 
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                       }`}
                     >
                       {isEventRecording ? (
@@ -912,13 +937,13 @@ const App = () => {
                     onChange={(e) => setNewEventText(e.target.value)}
                     placeholder="일정 내용을 입력하거나 음성을 사용하세요..."
                     rows={2}
-                    className={`bg-stone-950 border border-stone-700 text-stone-100 text-sm font-medium rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-teal-500 block w-full p-3 transition-colors resize-none placeholder-stone-600 ${isEventRecording ? 'bg-orange-900/10 border-orange-500/50 placeholder-orange-400/50' : ''}`}
+                    className={`bg-gray-50 border border-gray-200 text-gray-800 text-sm font-medium rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-teal-500 block w-full p-3 transition-colors resize-none placeholder-gray-400 ${isEventRecording ? 'bg-orange-50 border-orange-200 placeholder-orange-300' : ''}`}
                   />
                 </div>
 
                 <button 
                   onClick={handleAddEvent}
-                  className="w-full text-white bg-teal-600 hover:bg-teal-700 focus:ring-4 focus:ring-teal-900 font-bold rounded-xl text-sm px-5 py-4 text-center shadow-lg shadow-teal-900/50 transition-all transform hover:scale-[1.02] active:scale-95"
+                  className="w-full text-white bg-teal-600 hover:bg-teal-700 focus:ring-4 focus:ring-teal-200 font-bold rounded-xl text-sm px-5 py-4 text-center shadow-lg shadow-teal-100 transition-all transform hover:scale-[1.02] active:scale-95"
                 >
                   일정 저장
                 </button>
@@ -930,23 +955,23 @@ const App = () => {
 
       {/* Alarm Modal */}
       {alarmActive && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[100] p-4 animate-fade-in">
-          <div className="bg-stone-900 rounded-[2rem] shadow-2xl p-8 max-w-sm w-full text-center relative overflow-hidden ring-4 ring-orange-500/30">
-            <div className="w-24 h-24 bg-orange-900/20 rounded-full flex items-center justify-center mx-auto mb-6 text-orange-500 animate-bounce shadow-inner">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[100] p-4 animate-fade-in">
+          <div className="bg-white rounded-[2rem] shadow-2xl p-8 max-w-sm w-full text-center relative overflow-hidden ring-4 ring-orange-100">
+            <div className="w-24 h-24 bg-orange-50 rounded-full flex items-center justify-center mx-auto mb-6 text-orange-500 animate-bounce shadow-inner">
                <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                </svg>
             </div>
-            <h3 className="text-4xl font-extrabold text-white mb-1 tracking-tight">{alarmActive.time}</h3>
+            <h3 className="text-4xl font-extrabold text-gray-900 mb-1 tracking-tight">{alarmActive.time}</h3>
             <p className="text-orange-500 uppercase text-[10px] font-black tracking-[0.2em] mb-6">알람 울림</p>
-            <div className="bg-stone-950/50 p-6 rounded-2xl border border-stone-800 mb-8 shadow-inner">
-               <p className="text-lg font-medium text-stone-200 break-keep leading-relaxed">
+            <div className="bg-gray-50 p-6 rounded-2xl border border-gray-100 mb-8">
+               <p className="text-lg font-medium text-gray-800 break-keep leading-relaxed">
                   "{alarmActive.text}"
                </p>
             </div>
             <button 
               onClick={stopAlarm}
-              className="w-full text-white bg-orange-600 hover:bg-orange-700 font-bold rounded-2xl text-lg px-6 py-4 shadow-xl shadow-orange-900/50 transition transform hover:scale-[1.02] active:scale-95"
+              className="w-full text-white bg-orange-500 hover:bg-orange-600 font-bold rounded-2xl text-lg px-6 py-4 shadow-xl shadow-orange-200 transition transform hover:scale-[1.02] active:scale-95"
             >
               알람 끄기
             </button>
