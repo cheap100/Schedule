@@ -1,6 +1,6 @@
-
 import React, { useState, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
+import { GoogleGenAI } from "@google/genai";
 
 // --- Icons ---
 const MicIcon = ({ className = "w-6 h-6" }) => (
@@ -89,6 +89,17 @@ const generateTimeOptions = () => {
   }
   return times;
 };
+
+// --- Audio Decoding Helpers (for Gemini TTS) ---
+function base64ToBytes(base64: string) {
+  const binaryString = atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
 
 // --- Web Speech API Types ---
 interface IWindow extends Window {
@@ -196,25 +207,75 @@ const App = () => {
     alarmAudioRef.current = audio;
   }, []);
 
-  // --- TTS Function (Improved) ---
-  const speakText = (text: string) => {
-    if (!('speechSynthesis' in window)) {
-        alert("이 브라우저는 음성 안내를 지원하지 않습니다.");
-        return;
+  // --- TTS Function (Improved with Gemini Fallback) ---
+  const speakWithGemini = async (text: string) => {
+    if (!process.env.API_KEY) {
+      console.warn("API Key missing, cannot use Gemini TTS fallback.");
+      return;
     }
     
-    // Cancel current speech
-    window.speechSynthesis.cancel();
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash-preview-tts",
+        contents: { parts: [{ text }] },
+        config: {
+          responseModalities: ["AUDIO"],
+          speechConfig: {
+            voiceConfig: { prebuiltVoiceConfig: { voiceName: "Kore" } },
+          },
+        },
+      });
 
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'ko-KR';
-    utterance.rate = 1.0;
-    utterance.pitch = 1.0;
-    
-    // Wait a tiny bit to ensuring cancel finishes
-    setTimeout(() => {
+      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (base64Audio) {
+        // Cast window to any to access webkitAudioContext
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+        const pcmData = base64ToBytes(base64Audio);
+        const float32Data = new Float32Array(pcmData.length / 2);
+        const dataView = new DataView(pcmData.buffer);
+
+        for (let i = 0; i < pcmData.length / 2; i++) {
+          float32Data[i] = dataView.getInt16(i * 2, true) / 32768.0;
+        }
+
+        const buffer = audioContext.createBuffer(1, float32Data.length, 24000);
+        buffer.getChannelData(0).set(float32Data);
+
+        const source = audioContext.createBufferSource();
+        source.buffer = buffer;
+        source.connect(audioContext.destination);
+        source.start();
+      }
+    } catch (e) {
+      console.error("Gemini TTS failed", e);
+    }
+  };
+
+  const speakText = (text: string) => {
+    // 1. Try Browser TTS
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'ko-KR';
+      utterance.rate = 1.0;
+      // Handle error or end
+      utterance.onerror = () => {
+         // Fallback if browser error
+         speakWithGemini(text);
+      };
+      
+      // Attempt to speak
+      try {
         window.speechSynthesis.speak(utterance);
-    }, 50);
+      } catch (e) {
+        speakWithGemini(text);
+      }
+      return;
+    }
+
+    // 2. Fallback to Gemini
+    speakWithGemini(text);
   };
 
   const speakSchedule = (date: Date, eventList: Event[], isStartup = false) => {
@@ -243,6 +304,8 @@ const App = () => {
       });
     }
 
+    // For startup, we don't force it if context is blocked, just try.
+    // If it fails silently, that's better than an alert.
     speakText(text);
   };
 
@@ -252,10 +315,13 @@ const App = () => {
     const dateKey = formatDate(today);
     const todayEvents = events[dateKey] || [];
     
-    // Slight delay to allow UI to render before speaking (if browser allows auto-play)
     const timer = setTimeout(() => {
-        if (todayEvents.length > 0 || todayEvents.length === 0) {
+        // Attempt to speak on load - browsers might block this without interaction
+        // but we suppress errors to avoid annoying alerts.
+        try {
            speakSchedule(today, todayEvents, true);
+        } catch(e) {
+           console.log("Auto-speech blocked by browser policy");
         }
     }, 1000);
     return () => clearTimeout(timer);
@@ -420,11 +486,12 @@ const App = () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
+      // Determine MIME type (Prioritize MP4 for Safari/iOS compatibility)
       let mimeType = 'audio/webm';
-      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-         mimeType = 'audio/webm;codecs=opus';
-      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+      if (MediaRecorder.isTypeSupported('audio/mp4')) {
          mimeType = 'audio/mp4'; 
+      } else if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+         mimeType = 'audio/webm;codecs=opus';
       }
 
       const options = {
@@ -436,6 +503,7 @@ const App = () => {
       try {
         mediaRecorder = new MediaRecorder(stream, options);
       } catch (e) {
+        // Fallback for browsers that don't support options well
         mediaRecorder = new MediaRecorder(stream);
       }
 
@@ -449,7 +517,8 @@ const App = () => {
       };
 
       mediaRecorder.onstop = async () => {
-        const finalMimeType = mediaRecorder.mimeType || 'audio/webm';
+        // Use the actual mime type of the recorder or fallback
+        const finalMimeType = mediaRecorder.mimeType || mimeType || 'audio/webm';
         const audioBlob = new Blob(audioChunksRef.current, { type: finalMimeType });
         
         const reader = new FileReader();
@@ -537,7 +606,7 @@ const App = () => {
         await audio.play();
     } catch (e) {
         console.error("Play failed", e);
-        alert("재생 실패: " + e);
+        // Don't show alert for simple play interruptions
         setPlayingMemoId(null);
     }
   };
