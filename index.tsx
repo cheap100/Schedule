@@ -50,7 +50,13 @@ const XIcon = () => (
 const blobToBase64 = (blob: Blob): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+    reader.onloadend = () => {
+      const result = reader.result as string;
+      // Some browsers include the data URL prefix, some might not in certain contexts, 
+      // but readAsDataURL always includes it. We need to strip it.
+      const base64 = result.split(',')[1];
+      resolve(base64);
+    };
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
@@ -98,6 +104,10 @@ const App = () => {
   
   // Alarm State
   const [alarmActive, setAlarmActive] = useState<{ text: string, time: string } | null>(null);
+  
+  // Swipe State
+  const [touchStart, setTouchStart] = useState<{x: number, y: number} | null>(null);
+  const [touchEnd, setTouchEnd] = useState<{x: number, y: number} | null>(null);
   
   // Refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -158,7 +168,7 @@ const App = () => {
     const newDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
     setSelectedDate(newDate);
     setNewEventText("");
-    setIsEventModalOpen(true); // Open modal immediately
+    setIsEventModalOpen(true);
   };
 
   const closeEventModal = () => {
@@ -201,43 +211,51 @@ const App = () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
-      // Check supported MIME types
-      let mimeType = 'audio/webm';
-      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-        mimeType = 'audio/webm;codecs=opus';
+      let mimeType = '';
+      if (MediaRecorder.isTypeSupported('audio/webm')) {
+        mimeType = 'audio/webm';
       } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
         mimeType = 'audio/mp4';
+      } else {
+        // Fallback or let browser decide (might be empty string)
+        console.warn("No preferred mime type supported, using default.");
       }
       
       recordingMimeTypeRef.current = mimeType;
       
-      const mediaRecorder = new MediaRecorder(stream, { mimeType });
+      const options = mimeType ? { mimeType } : {};
+      const mediaRecorder = new MediaRecorder(stream, options);
+      
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
       mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
+        if (event.data && event.data.size > 0) {
           audioChunksRef.current.push(event.data);
         }
       };
 
       mediaRecorder.onstop = async () => {
         const capturedMimeType = recordingMimeTypeRef.current || 'audio/webm';
+        // Create blob from chunks
         const audioBlob = new Blob(audioChunksRef.current, { type: capturedMimeType });
         
         if (audioBlob.size > 0) {
             await transcribeAudio(audioBlob, capturedMimeType);
         } else {
-            console.warn("Audio blob is empty");
-            alert("녹음된 소리가 없습니다. 다시 시도해주세요.");
+            console.error("Recorded audio size is 0");
+            alert("녹음된 소리가 감지되지 않았습니다.");
         }
+        
+        // Stop all tracks to release mic
+        stream.getTracks().forEach(track => track.stop());
       };
 
       mediaRecorder.start();
       setIsRecording(true);
     } catch (err) {
       console.error("Error accessing microphone:", err);
-      alert("마이크 권한이 필요합니다. 브라우저 설정에서 권한을 확인해주세요.");
+      alert("마이크 권한이 필요하거나 오류가 발생했습니다.");
     }
   };
 
@@ -245,7 +263,6 @@ const App = () => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
-      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
     }
   };
 
@@ -255,15 +272,18 @@ const App = () => {
       const base64Audio = await blobToBase64(audioBlob);
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       
-      // Clean up mimeType for API (remove codecs)
-      const cleanMimeType = mimeType.split(';')[0]; 
+      // Clean up mimeType for API (Gemini prefers simple types like 'audio/mp3', 'audio/webm')
+      // If it contains codecs, sometimes API rejects it. Safe bet: use the container type.
+      const cleanMimeType = mimeType.split(';')[0] || 'audio/webm';
       
+      console.log(`Sending audio to Gemini... Size: ${audioBlob.size}, Type: ${cleanMimeType}`);
+
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
         contents: {
           parts: [
             { inlineData: { mimeType: cleanMimeType, data: base64Audio } },
-            { text: "사용자가 말한 내용을 정확한 한국어 텍스트로 받아쓰기해줘. 다른 설명은 하지 말고 텍스트만 출력해." }
+            { text: "Transcribe the following audio into Korean text exactly as spoken. Do not add any conversational filler or descriptions." }
           ]
         }
       });
@@ -271,12 +291,55 @@ const App = () => {
       const text = response.text;
       if (text) {
           setNewEventText(prev => (prev ? prev + " " + text : text));
+      } else {
+        alert("음성을 텍스트로 변환하지 못했습니다.");
       }
     } catch (error) {
       console.error("Transcription error:", error);
-      alert(`음성 인식 실패: ${error instanceof Error ? error.message : "알 수 없는 오류"}`);
+      alert(`음성 인식 오류: ${error instanceof Error ? error.message : "알 수 없음"}`);
     } finally {
       setTranscribing(false);
+    }
+  };
+
+  // --- Swipe Logic ---
+  const minSwipeDistance = 50;
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    setTouchEnd(null);
+    setTouchStart({ x: e.targetTouches[0].clientX, y: e.targetTouches[0].clientY });
+  };
+
+  const onTouchMove = (e: React.TouchEvent) => {
+    setTouchEnd({ x: e.targetTouches[0].clientX, y: e.targetTouches[0].clientY });
+  };
+
+  const onTouchEnd = () => {
+    if (!touchStart || !touchEnd) return;
+    
+    const distanceX = touchStart.x - touchEnd.x;
+    const distanceY = touchStart.y - touchEnd.y;
+    const isHorizontal = Math.abs(distanceX) > Math.abs(distanceY);
+
+    // Horizontal Swipe
+    if (isHorizontal) {
+      if (Math.abs(distanceX) > minSwipeDistance) {
+         if (distanceX > 0) {
+            handleNextMonth(); // Swiped Left -> Next
+         } else {
+            handlePrevMonth(); // Swiped Right -> Prev
+         }
+      }
+    } 
+    // Vertical Swipe
+    else {
+      if (Math.abs(distanceY) > minSwipeDistance) {
+        if (distanceY > 0) {
+           handleNextMonth(); // Swiped Up -> Next (Natural scrolling feel)
+        } else {
+           handlePrevMonth(); // Swiped Down -> Prev
+        }
+      }
     }
   };
 
@@ -310,13 +373,10 @@ const App = () => {
       
       // Styling logic
       if (isSelected(d)) {
-         // Selected: Distinct Yellow background, Stronger border
          containerClass += "bg-yellow-50 border-yellow-400 ring-2 ring-yellow-300 ring-inset z-10 shadow-md";
       } else if (isToday(d)) {
-         // Today: Distinct Blue background
          containerClass += "bg-blue-50 border-blue-300";
       } else {
-         // Normal
          containerClass += "bg-white hover:bg-gray-50";
       }
 
@@ -363,12 +423,9 @@ const App = () => {
   };
 
   const openGlobalMic = () => {
-    // If not on a date, default to today
     if (!isEventModalOpen) {
        setSelectedDate(new Date());
        setIsEventModalOpen(true);
-       // Small timeout to let modal open then start recording could be added, 
-       // but user probably wants to see the UI first.
        setTimeout(() => {
           document.getElementById('eventInput')?.focus();
        }, 100);
@@ -376,7 +433,7 @@ const App = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-800 font-sans pb-20">
+    <div className="min-h-screen bg-gray-50 text-gray-800 font-sans pb-20 select-none">
       {/* Top Bar */}
       <header className="bg-white shadow-sm sticky top-0 z-50 border-b border-gray-200">
         <div className="max-w-md mx-auto px-4 h-14 flex items-center justify-between">
@@ -385,7 +442,7 @@ const App = () => {
           </h1>
           
           <div className="flex items-center space-x-3">
-             {/* Global Voice: Opens modal for today */}
+             {/* Global Voice */}
             <button onClick={openGlobalMic} className="p-2 bg-gray-100 rounded-full text-gray-600 hover:text-blue-500 hover:bg-blue-50 transition shadow-sm">
               <MicIcon className="w-5 h-5" />
             </button>
@@ -410,7 +467,12 @@ const App = () => {
       <main className="max-w-md mx-auto p-4 space-y-6">
         
         {/* Calendar Card */}
-        <div className="bg-white rounded-2xl shadow-lg overflow-hidden border border-gray-100">
+        <div 
+          className="bg-white rounded-2xl shadow-lg overflow-hidden border border-gray-100"
+          onTouchStart={onTouchStart}
+          onTouchMove={onTouchMove}
+          onTouchEnd={onTouchEnd}
+        >
           <div className="p-4 flex items-center justify-between bg-white border-b border-gray-100">
             <button onClick={handlePrevMonth} className="p-2 hover:bg-gray-100 rounded-full transition text-gray-500">
               <ChevronLeft />
@@ -508,8 +570,8 @@ const App = () => {
                       type="text"
                       value={newEventText}
                       onChange={(e) => setNewEventText(e.target.value)}
-                      placeholder={isRecording ? "듣고 있습니다..." : "내용 입력"}
-                      className="bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pr-10"
+                      placeholder={isRecording ? "말씀하세요..." : "내용 입력"}
+                      className={`bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pr-10 transition-colors ${isRecording ? 'bg-red-50 border-red-200' : ''}`}
                       autoFocus
                     />
                     {/* Inline Mic Button */}
@@ -530,7 +592,7 @@ const App = () => {
                 {transcribing && (
                    <div className="flex items-center space-x-2 mb-2 text-xs text-blue-600 font-medium animate-pulse">
                       <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce"></div>
-                      <span>음성 변환 중...</span>
+                      <span>텍스트로 변환 중...</span>
                    </div>
                 )}
 
