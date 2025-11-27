@@ -9,16 +9,16 @@ const MicIcon = ({ className = "w-6 h-6" }) => (
   </svg>
 );
 
+const StopIcon = ({ className = "w-6 h-6" }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <rect x="6" y="6" width="12" height="12" rx="2" ry="2" strokeWidth={2} />
+  </svg>
+);
+
 const CameraIcon = ({ className = "w-6 h-6" }) => (
   <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-  </svg>
-);
-
-const KakaoIcon = ({ className = "w-6 h-6" }) => (
-  <svg className={className} viewBox="0 0 24 24" fill="currentColor">
-    <path d="M12 3C6.48 3 2 6.48 2 10.77C2 13.63 3.92 16.11 6.84 17.43C6.71 17.89 6.27 19.38 6.17 19.72C6.07 20.12 6.5 20.31 6.77 20.13C6.88 20.06 9.38 18.39 10.55 17.65C11.02 17.71 11.51 17.75 12 17.75C17.52 17.75 22 14.27 22 9.98C22 5.69 17.52 3 12 3Z" />
   </svg>
 );
 
@@ -103,6 +103,7 @@ const App = () => {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const alarmAudioRef = useRef<HTMLAudioElement | null>(null);
+  const recordingMimeTypeRef = useRef<string>("");
 
   // Initialize Audio Context for Beep
   useEffect(() => {
@@ -199,30 +200,49 @@ const App = () => {
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      
+      // Check supported MIME types
+      let mimeType = 'audio/webm';
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        mimeType = 'audio/webm;codecs=opus';
+      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+        mimeType = 'audio/mp4';
+      }
+      
+      recordingMimeTypeRef.current = mimeType;
+      
+      const mediaRecorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
       mediaRecorder.ondataavailable = (event) => {
-        audioChunksRef.current.push(event.data);
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
       };
 
       mediaRecorder.onstop = async () => {
-        const mimeType = mediaRecorder.mimeType || 'audio/webm';
-        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
-        await transcribeAudio(audioBlob, mimeType);
+        const capturedMimeType = recordingMimeTypeRef.current || 'audio/webm';
+        const audioBlob = new Blob(audioChunksRef.current, { type: capturedMimeType });
+        
+        if (audioBlob.size > 0) {
+            await transcribeAudio(audioBlob, capturedMimeType);
+        } else {
+            console.warn("Audio blob is empty");
+            alert("녹음된 소리가 없습니다. 다시 시도해주세요.");
+        }
       };
 
       mediaRecorder.start();
       setIsRecording(true);
     } catch (err) {
       console.error("Error accessing microphone:", err);
-      alert("마이크 권한이 필요합니다.");
+      alert("마이크 권한이 필요합니다. 브라우저 설정에서 권한을 확인해주세요.");
     }
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
       mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
@@ -235,12 +255,15 @@ const App = () => {
       const base64Audio = await blobToBase64(audioBlob);
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       
+      // Clean up mimeType for API (remove codecs)
+      const cleanMimeType = mimeType.split(';')[0]; 
+      
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
         contents: {
           parts: [
-            { inlineData: { mimeType: mimeType, data: base64Audio } },
-            { text: "Transcribe this audio exactly as spoken into Korean text." }
+            { inlineData: { mimeType: cleanMimeType, data: base64Audio } },
+            { text: "사용자가 말한 내용을 정확한 한국어 텍스트로 받아쓰기해줘. 다른 설명은 하지 말고 텍스트만 출력해." }
           ]
         }
       });
@@ -251,7 +274,7 @@ const App = () => {
       }
     } catch (error) {
       console.error("Transcription error:", error);
-      alert("음성 인식에 실패했습니다.");
+      alert(`음성 인식 실패: ${error instanceof Error ? error.message : "알 수 없는 오류"}`);
     } finally {
       setTranscribing(false);
     }
@@ -380,12 +403,6 @@ const App = () => {
               />
             </button>
             
-            {/* Kakao */}
-            <a href="https://talk.kakao.com" target="_blank" rel="noreferrer" className="text-yellow-900 hover:text-yellow-700 transition">
-              <div className="bg-[#FEE500] rounded-full p-1.5 shadow-sm">
-                <KakaoIcon className="w-5 h-5" />
-              </div>
-            </a>
           </div>
         </div>
       </header>
@@ -491,7 +508,7 @@ const App = () => {
                       type="text"
                       value={newEventText}
                       onChange={(e) => setNewEventText(e.target.value)}
-                      placeholder="내용 입력"
+                      placeholder={isRecording ? "듣고 있습니다..." : "내용 입력"}
                       className="bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pr-10"
                       autoFocus
                     />
@@ -505,7 +522,7 @@ const App = () => {
                           : 'text-gray-400 hover:text-blue-600 hover:bg-blue-50'
                       }`}
                     >
-                      <MicIcon className="w-4 h-4" />
+                      {isRecording ? <StopIcon className="w-4 h-4" /> : <MicIcon className="w-4 h-4" />}
                     </button>
                   </div>
                 </div>
