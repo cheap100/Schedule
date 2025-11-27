@@ -46,6 +46,12 @@ const XIcon = () => (
   </svg>
 );
 
+const SpeakerIcon = ({ className = "w-5 h-5" }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+  </svg>
+);
+
 // --- Helpers ---
 const formatDate = (date: Date) => {
   const y = date.getFullYear();
@@ -154,17 +160,53 @@ const App = () => {
     setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
   };
 
+  // --- TTS Function ---
+  const speakSchedule = (date: Date, eventList: Event[]) => {
+    if (!('speechSynthesis' in window)) return;
+
+    window.speechSynthesis.cancel(); // 이전 음성 중단
+
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    let text = `${month}월 ${day}일, `;
+
+    if (!eventList || eventList.length === 0) {
+      text += "일정이 없습니다.";
+    } else {
+      text += `총 ${eventList.length}개의 일정이 있습니다. `;
+      eventList.forEach((e) => {
+        // 시간을 자연스럽게 읽기 위해 처리
+        const [h, m] = e.time.split(':');
+        const minText = m === '00' ? '' : `${m}분`;
+        text += `${h}시 ${minText}, ${e.text}. `;
+      });
+    }
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'ko-KR';
+    utterance.rate = 1.0; 
+    window.speechSynthesis.speak(utterance);
+  };
+
   const handleDateClick = (day: number) => {
     const newDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
     setSelectedDate(newDate);
     setNewEventText("");
     setIsEventModalOpen(true);
+
+    // 팝업이 열릴 때 바로 읽어주기
+    const dateKey = formatDate(newDate);
+    speakSchedule(newDate, events[dateKey]);
   };
 
   const closeEventModal = () => {
     setIsEventModalOpen(false);
     if (isRecording) {
       stopVoiceRecognition();
+    }
+    // 창 닫으면 말하기 중단
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
     }
   };
 
@@ -227,13 +269,6 @@ const App = () => {
         }
       }
       
-      // 기존 텍스트에 덧붙이지 않고, 현재 세션의 입력값을 처리하려면 로직이 복잡해지므로
-      // 여기서는 심플하게 현재 인식된 내용을 바로 반영합니다.
-      // 사용자가 직접 타이핑한 것과 섞이지 않게 하려면 append 방식이 좋으나,
-      // React state 업데이트 타이밍 이슈가 있으므로 아래 방식 사용
-      
-      // 실제로는 중간 결과(interim)를 보여주다가 확정(final)되면 state에 박는게 가장 자연스러움
-      // 간단하게 구현:
       if (finalTranscript) {
           setNewEventText(prev => prev + " " + finalTranscript);
       }
@@ -245,12 +280,7 @@ const App = () => {
     };
 
     recognition.onend = () => {
-      // 멈춤 버튼을 누르지 않았는데 저절로 꺼지는 경우 (침묵 등)
-      // continuous가 true여도 오래 침묵하면 꺼질 수 있음
-      // 여기서는 상태만 업데이트
       if (isRecording) {
-         // 의도치 않게 꺼졌으면 다시 켜거나, 그냥 꺼진 상태로 둘 수 있음.
-         // UX상 그냥 꺼지는게 나을 수 있음.
          setIsRecording(false);
       }
     };
@@ -471,9 +501,18 @@ const App = () => {
             <div className="bg-blue-600 px-5 py-4 flex justify-between items-center shadow-md">
                <div>
                   <span className="text-xs font-medium text-blue-100 uppercase tracking-wider block mb-0.5">선택된 날짜</span>
-                  <h3 className="text-xl font-bold text-white">
-                    {selectedDate.getMonth() + 1}월 {selectedDate.getDate()}일
-                  </h3>
+                  <div className="flex items-center space-x-2">
+                    <h3 className="text-xl font-bold text-white">
+                      {selectedDate.getMonth() + 1}월 {selectedDate.getDate()}일
+                    </h3>
+                    <button 
+                      onClick={() => speakSchedule(selectedDate, events[formatDate(selectedDate)])}
+                      className="text-blue-200 hover:text-white transition p-1 rounded-full hover:bg-blue-500"
+                      title="다시 듣기"
+                    >
+                      <SpeakerIcon />
+                    </button>
+                  </div>
                </div>
                <button 
                   onClick={closeEventModal}
