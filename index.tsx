@@ -88,7 +88,26 @@ interface Event {
 const App = () => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [events, setEvents] = useState<Record<string, Event[]>>({});
+  
+  // Persistent State: Load events from localStorage on mount
+  const [events, setEvents] = useState<Record<string, Event[]>>(() => {
+    try {
+      const saved = localStorage.getItem('calendar_events');
+      return saved ? JSON.parse(saved) : {};
+    } catch (e) {
+      console.error("Failed to load events", e);
+      return {};
+    }
+  });
+
+  // Save events to localStorage whenever they change
+  useEffect(() => {
+    try {
+      localStorage.setItem('calendar_events', JSON.stringify(events));
+    } catch (e) {
+      console.error("Failed to save events", e);
+    }
+  }, [events]);
   
   // UI State
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
@@ -117,6 +136,59 @@ const App = () => {
     audio.loop = true;
     alarmAudioRef.current = audio;
   }, []);
+
+  // --- TTS Function ---
+  const speakSchedule = (date: Date, eventList: Event[], isStartup = false) => {
+    if (!('speechSynthesis' in window)) return;
+
+    // If it's not a user interaction (startup), browser might block it.
+    // We attempt it anyway, but errors are expected in some browsers.
+    window.speechSynthesis.cancel(); 
+
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    
+    let text = "";
+    if (isStartup) {
+       text = `오늘 ${month}월 ${day}일, `;
+    } else {
+       text = `${month}월 ${day}일, `;
+    }
+
+    if (!eventList || eventList.length === 0) {
+      if (isStartup) {
+        text += "예정된 일정이 없습니다.";
+      } else {
+        text += "일정이 없습니다.";
+      }
+    } else {
+      text += `총 ${eventList.length}개의 일정이 있습니다. `;
+      eventList.forEach((e) => {
+        const [h, m] = e.time.split(':');
+        const minText = m === '00' ? '' : `${m}분`;
+        text += `${h}시 ${minText}, ${e.text}. `;
+      });
+    }
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'ko-KR';
+    utterance.rate = 1.0; 
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // Startup Notification
+  useEffect(() => {
+    const today = new Date();
+    const dateKey = formatDate(today);
+    const todayEvents = events[dateKey] || [];
+    
+    if (todayEvents.length > 0) {
+      // Trigger Voice
+      // Note: Browsers generally block audio without interaction.
+      // This works if the user has interacted with the domain before or browser settings allow.
+      speakSchedule(today, todayEvents, true);
+    }
+  }, []); // Run once on mount
 
   // Alarm Check Loop
   useEffect(() => {
@@ -160,41 +232,12 @@ const App = () => {
     setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
   };
 
-  // --- TTS Function ---
-  const speakSchedule = (date: Date, eventList: Event[]) => {
-    if (!('speechSynthesis' in window)) return;
-
-    window.speechSynthesis.cancel(); // 이전 음성 중단
-
-    const month = date.getMonth() + 1;
-    const day = date.getDate();
-    let text = `${month}월 ${day}일, `;
-
-    if (!eventList || eventList.length === 0) {
-      text += "일정이 없습니다.";
-    } else {
-      text += `총 ${eventList.length}개의 일정이 있습니다. `;
-      eventList.forEach((e) => {
-        // 시간을 자연스럽게 읽기 위해 처리
-        const [h, m] = e.time.split(':');
-        const minText = m === '00' ? '' : `${m}분`;
-        text += `${h}시 ${minText}, ${e.text}. `;
-      });
-    }
-
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'ko-KR';
-    utterance.rate = 1.0; 
-    window.speechSynthesis.speak(utterance);
-  };
-
   const handleDateClick = (day: number) => {
     const newDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
     setSelectedDate(newDate);
     setNewEventText("");
     setIsEventModalOpen(true);
 
-    // 팝업이 열릴 때 바로 읽어주기
     const dateKey = formatDate(newDate);
     speakSchedule(newDate, events[dateKey]);
   };
@@ -204,7 +247,6 @@ const App = () => {
     if (isRecording) {
       stopVoiceRecognition();
     }
-    // 창 닫으면 말하기 중단
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
     }
@@ -228,6 +270,7 @@ const App = () => {
     });
     
     setNewEventText("");
+    alert("일정이 성공적으로 저장되었습니다!");
   };
 
   const handleDeleteEvent = (id: string) => {
@@ -249,9 +292,9 @@ const App = () => {
     }
 
     const recognition = new SpeechRecognition();
-    recognition.lang = 'ko-KR'; // 한국어 설정
-    recognition.continuous = true; // 멈출때까지 계속 인식
-    recognition.interimResults = true; // 중간 결과 표시
+    recognition.lang = 'ko-KR';
+    recognition.continuous = true; 
+    recognition.interimResults = true; 
 
     recognition.onstart = () => {
       setIsRecording(true);
@@ -259,13 +302,10 @@ const App = () => {
 
     recognition.onresult = (event: any) => {
       let finalTranscript = '';
-      let interimTranscript = '';
-
+      
       for (let i = event.resultIndex; i < event.results.length; ++i) {
         if (event.results[i].isFinal) {
           finalTranscript += event.results[i][0].transcript;
-        } else {
-          interimTranscript += event.results[i][0].transcript;
         }
       }
       
@@ -361,12 +401,13 @@ const App = () => {
     for (let d = 1; d <= daysInMonth; d++) {
       const dateKey = formatDate(new Date(year, month, d));
       const hasEvents = events[dateKey]?.length > 0;
+      const isTodayCell = isToday(d);
       
       let containerClass = "h-24 p-1 border border-gray-100 cursor-pointer transition-all flex flex-col relative ";
       
       if (isSelected(d)) {
          containerClass += "bg-yellow-50 border-yellow-400 ring-2 ring-yellow-300 ring-inset z-10 shadow-md";
-      } else if (isToday(d)) {
+      } else if (isTodayCell) {
          containerClass += "bg-blue-50 border-blue-300";
       } else {
          containerClass += "bg-white hover:bg-gray-50";
@@ -379,17 +420,20 @@ const App = () => {
           className={containerClass}
         >
           <div className="flex justify-between items-start mb-1">
-            <span className={`text-sm rounded-full w-6 h-6 flex items-center justify-center font-bold ${isToday(d) ? 'bg-blue-600 text-white' : 'text-gray-700'}`}>
+            <span className={`text-sm rounded-full w-6 h-6 flex items-center justify-center font-bold ${isTodayCell ? 'bg-blue-600 text-white' : 'text-gray-700'}`}>
               {d}
             </span>
             {hasEvents && (
-               <div className="w-1.5 h-1.5 bg-red-500 rounded-full"></div>
+               <div className={`w-1.5 h-1.5 rounded-full ${isTodayCell ? 'bg-white animate-pulse' : 'bg-red-500'}`}></div>
             )}
           </div>
           
           <div className="flex-1 overflow-hidden w-full space-y-0.5">
             {events[dateKey]?.slice(0, 4).map((ev, idx) => (
-              <div key={idx} className="px-1.5 py-0.5 text-[9px] font-medium bg-indigo-50 text-indigo-700 rounded-md truncate border border-indigo-100">
+              <div 
+                key={idx} 
+                className={`px-1.5 py-0.5 text-[9px] font-medium rounded-md truncate border ${isTodayCell ? 'bg-blue-100 text-blue-800 border-blue-200 animate-pulse font-bold' : 'bg-indigo-50 text-indigo-700 border-indigo-100'}`}
+              >
                 {ev.text}
               </div>
             ))}
@@ -419,7 +463,6 @@ const App = () => {
        setSelectedDate(new Date());
        setIsEventModalOpen(true);
        setTimeout(() => {
-         // Auto start logic if desired, or just focus
          document.getElementById('eventInput')?.focus();
        }, 100);
     }
