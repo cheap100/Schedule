@@ -64,10 +64,6 @@ const SpeakerIcon = ({ className = "w-5 h-5" }) => (
   </svg>
 );
 
-const MiniPlayIcon = ({ className = "w-3 h-3" }) => (
-    <svg className={className} fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
-);
-
 // --- Helpers ---
 const formatDate = (date: Date) => {
   const y = date.getFullYear();
@@ -180,6 +176,7 @@ const App = () => {
   // Event Recording (Speech to Text) State
   const [isEventRecording, setIsEventRecording] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const processedResultIndexRef = useRef(0); // Track processed speech results to avoid duplication
 
   // Voice Memo Recorder State
   const [isMemoRecording, setIsMemoRecording] = useState(false);
@@ -278,6 +275,16 @@ const App = () => {
     speakWithGemini(text);
   };
 
+  const speakSingleEvent = (event: Event) => {
+    const [h, m] = event.time.split(':');
+    const hour = parseInt(h, 10);
+    const minText = m === '00' ? '' : `${m}분`;
+    const timeText = `${hour}시 ${minText}`;
+    
+    // Read: "9시 30분, [내용]"
+    speakText(`${timeText}, ${event.text}`);
+  };
+
   const speakSchedule = (date: Date, eventList: Event[], isStartup = false) => {
     const month = date.getMonth() + 1;
     const day = date.getDate();
@@ -286,7 +293,7 @@ const App = () => {
     if (isStartup) {
        text = `반갑습니다. 오늘 ${month}월 ${day}일, `;
     } else {
-       text = `${month}월 ${day}일 일정을 알려드릴게요. `;
+       text = `${month}월 ${day}일 일정을 읽어드릴게요. `;
     }
 
     if (!eventList || eventList.length === 0) {
@@ -299,8 +306,10 @@ const App = () => {
       text += `총 ${eventList.length}개의 일정이 있습니다. `;
       eventList.forEach((e) => {
         const [h, m] = e.time.split(':');
+        const hour = parseInt(h, 10);
         const minText = m === '00' ? '' : `${m}분`;
-        text += `${h}시 ${minText}, ${e.text}. `;
+        // Add periods for pauses
+        text += `${hour}시 ${minText}, ${e.text}. `;
       });
     }
 
@@ -435,6 +444,9 @@ const App = () => {
     recognition.lang = 'ko-KR';
     recognition.continuous = true; 
     recognition.interimResults = true; 
+    
+    // Reset processed index for new session
+    processedResultIndexRef.current = 0;
 
     recognition.onstart = () => {
       setIsEventRecording(true);
@@ -442,13 +454,23 @@ const App = () => {
 
     recognition.onresult = (event: any) => {
       let finalTranscript = '';
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
+      
+      // FIX: Manually track processed results to avoid duplication bugs
+      // where resultIndex might be unreliable in some browsers/contexts
+      const startIndex = processedResultIndexRef.current;
+      
+      for (let i = startIndex; i < event.results.length; ++i) {
         if (event.results[i].isFinal) {
           finalTranscript += event.results[i][0].transcript;
+          processedResultIndexRef.current = i + 1;
         }
       }
+      
       if (finalTranscript) {
-          setNewEventText(prev => prev + " " + finalTranscript);
+          const trimmed = finalTranscript.trim();
+          if (trimmed) {
+             setNewEventText(prev => prev ? `${prev} ${trimmed}` : trimmed);
+          }
       }
     };
 
@@ -957,11 +979,11 @@ const App = () => {
                       </div>
                       <div className="flex items-center space-x-1">
                          <button 
-                           onClick={() => speakText(event.text)}
+                           onClick={() => speakSingleEvent(event)}
                            className="text-gray-300 hover:text-teal-500 p-1.5 rounded-full hover:bg-teal-50 transition"
-                           title="듣기"
+                           title="일정 듣기"
                          >
-                            <MiniPlayIcon />
+                            <SpeakerIcon className="w-4 h-4" />
                          </button>
                          <button 
                            onClick={() => handleDeleteEvent(event.id)}
