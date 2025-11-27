@@ -176,7 +176,7 @@ const App = () => {
   // Event Recording (Speech to Text) State
   const [isEventRecording, setIsEventRecording] = useState(false);
   const recognitionRef = useRef<any>(null);
-  const processedResultIndexRef = useRef(0); // Track processed speech results to avoid duplication
+  // Removed manual tracking ref as we switch to event.resultIndex
 
   // Voice Memo Recorder State
   const [isMemoRecording, setIsMemoRecording] = useState(false);
@@ -387,7 +387,9 @@ const App = () => {
     const dateKey = formatDate(newDate);
     // Auto read schedule on open
     setTimeout(() => {
-        speakSchedule(newDate, events[dateKey]);
+        try {
+          speakSchedule(newDate, events[dateKey]);
+        } catch(e) { console.warn("TTS error on open", e) }
     }, 500);
   };
 
@@ -444,9 +446,6 @@ const App = () => {
     recognition.lang = 'ko-KR';
     recognition.continuous = true; 
     recognition.interimResults = true; 
-    
-    // Reset processed index for new session
-    processedResultIndexRef.current = 0;
 
     recognition.onstart = () => {
       setIsEventRecording(true);
@@ -455,22 +454,19 @@ const App = () => {
     recognition.onresult = (event: any) => {
       let finalTranscript = '';
       
-      // FIX: Manually track processed results to avoid duplication bugs
-      // where resultIndex might be unreliable in some browsers/contexts
-      const startIndex = processedResultIndexRef.current;
-      
-      for (let i = startIndex; i < event.results.length; ++i) {
+      // Use resultIndex to correctly get only the new results
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
         if (event.results[i].isFinal) {
           finalTranscript += event.results[i][0].transcript;
-          processedResultIndexRef.current = i + 1;
         }
       }
       
       if (finalTranscript) {
-          const trimmed = finalTranscript.trim();
-          if (trimmed) {
-             setNewEventText(prev => prev ? `${prev} ${trimmed}` : trimmed);
-          }
+          setNewEventText(prev => {
+             const trimmedCurrent = prev.trim();
+             const trimmedNew = finalTranscript.trim();
+             return trimmedCurrent ? `${trimmedCurrent} ${trimmedNew}` : trimmedNew;
+          });
       }
     };
 
@@ -930,7 +926,7 @@ const App = () => {
 
       {/* Event Input Modal */}
       {isEventModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-md animate-fade-in" onClick={closeEventModal}>
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/40 backdrop-blur-md animate-fade-in" onClick={closeEventModal}>
           <div 
             className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all scale-100 relative ring-1 ring-gray-100"
             onClick={(e) => e.stopPropagation()}
@@ -998,7 +994,7 @@ const App = () => {
               </div>
 
               {/* Add Event Form */}
-              <div className="border-t border-gray-100 pt-6">
+              <div className="border-t border-gray-100 pt-6 bg-gray-50/50 -mx-6 px-6 -mb-6 pb-6">
                 <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex justify-between items-center">
                   <span>새 일정 추가</span>
                   {/* Status */}
@@ -1019,7 +1015,7 @@ const App = () => {
                       <select 
                         value={newEventTime}
                         onChange={(e) => setNewEventTime(e.target.value)}
-                        className="appearance-none bg-gray-50 border border-gray-200 text-gray-800 text-sm font-bold rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-teal-500 block p-3 pr-8 min-w-[100px]"
+                        className="appearance-none bg-white border border-gray-200 text-gray-800 text-sm font-bold rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-teal-500 block p-3 pr-8 min-w-[100px]"
                       >
                         {generateTimeOptions().map(time => (
                           <option key={time} value={time}>{time}</option>
@@ -1036,7 +1032,7 @@ const App = () => {
                       className={`flex-1 flex items-center justify-center space-x-2 p-3 rounded-xl font-bold transition-all ${
                         isEventRecording 
                           ? 'bg-orange-500 text-white shadow-lg shadow-orange-200 ring-2 ring-orange-300' 
-                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'
                       }`}
                     >
                       {isEventRecording ? (
@@ -1059,7 +1055,7 @@ const App = () => {
                     onChange={(e) => setNewEventText(e.target.value)}
                     placeholder="일정 내용을 입력하세요"
                     rows={2}
-                    className={`bg-gray-50 border border-gray-200 text-gray-800 text-sm font-medium rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-teal-500 block w-full p-3 transition-colors resize-none placeholder-gray-400 ${isEventRecording ? 'bg-orange-50 border-orange-200 placeholder-orange-300' : ''}`}
+                    className={`bg-white border border-gray-200 text-gray-800 text-sm font-medium rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-teal-500 block w-full p-3 transition-colors resize-none placeholder-gray-400 ${isEventRecording ? 'bg-orange-50 border-orange-200 placeholder-orange-300' : ''}`}
                   />
                 </div>
 
