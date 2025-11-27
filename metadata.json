@@ -1,0 +1,8 @@
+{
+  "requestFramePermissions": [
+    "microphone",
+    "camera"
+  ],
+  "description": "Smart Calendar with Voice AI and Alarms",
+  "name": "App"
+}
